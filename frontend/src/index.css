@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body { @apply bg-ink text-text font-sans; }
+  * { @apply box-border; }
+}
+
+@layer components {
+  .card { @apply bg-panel border border-border rounded-lg p-5; }
+  .label { @apply font-mono text-[0.62rem] text-muted uppercase tracking-widest; }
+  .badge-blue  { @apply bg-blue/10 text-blue border border-blue/25 font-mono font-semibold; }
+  .badge-green { @apply bg-green/10 text-green border border-green/25 font-mono font-semibold; }
+  .badge-amber { @apply bg-amber/10 text-amber border border-amber/25 font-mono font-semibold; }
+  .badge-red   { @apply bg-red/10 text-red border border-red/25 font-mono font-semibold; }
+  .badge-dim   { @apply bg-white/5 text-dim border border-white/10 font-mono; }
+  .dot-spin { @apply w-2 h-2 rounded-full bg-amber animate-pulse; }
+  .dot-ok   { @apply w-2 h-2 rounded-full bg-green; }
+  .dot-err  { @apply w-2 h-2 rounded-full bg-red; }
+  .dot-idle { @apply w-2 h-2 rounded-full bg-border; }
+  .btn-primary { @apply bg-blue/15 hover:bg-blue/25 text-blue border border-blue/25 px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer; }
+  .btn-ghost   { @apply hover:bg-white/5 text-dim px-3 py-1.5 rounded-md text-sm transition-colors cursor-pointer; }
+  .input       { @apply bg-ink border border-border rounded-md px-3 py-2 text-sm text-text placeholder:text-muted focus:outline-none focus:border-blue/50 w-full; }
+  .p1 { @apply text-green font-mono text-xs font-semibold; }
+  .p2 { @apply text-blue font-mono text-xs font-semibold; }
+  .p3 { @apply text-amber font-mono text-xs font-semibold; }
+  .p4 { @apply text-dim font-mono text-xs; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeIn 0.3s ease forwards; }
