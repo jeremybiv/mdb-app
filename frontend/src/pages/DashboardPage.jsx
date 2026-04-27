@@ -7,6 +7,7 @@ import { SocioEco } from '../components/SocioEco.jsx';
 import { RisquesMdb } from '../components/RisquesMdb.jsx';
 import { ArtisansTable } from '../components/ArtisansTable.jsx';
 import { TradeSelector } from '../components/TradeSelector.jsx';
+import { DebugPanel } from '../components/DebugPanel.jsx';
 import { usePLU } from '../hooks/usePLU.js';
 import { useArtisans } from '../hooks/useArtisans.js';
 import { getSyntheseMarche } from '../lib/api.js';
@@ -23,7 +24,10 @@ export function DashboardPage() {
   const plu = usePLU();
   const artisans = useArtisans();
   const [trades, setTrades] = useState([]);
+  const [source, setSource] = useState('sirene');
+  const [debugMode, setDebugMode] = useState(false);
   const [activeTab, setActiveTab] = useState('zone');
+  const [propertyType, setPropertyType] = useState('maison');
   const [synthese, setSynthese] = useState(null);
   const [loadingSynthese, setLoadingSynthese] = useState(false);
 
@@ -37,7 +41,7 @@ export function DashboardPage() {
   const handleArtisanSearch = () => {
     const dept = plu.geo?.citycode?.substring(0, 2) || '01';
     artisans.search({
-      trades, departement: dept,
+      trades, source, debug: debugMode, departement: dept,
       adresse: plu.geo?.label,
       lat: plu.geo?.lat, lon: plu.geo?.lon,
       zonePlu: plu.zone?.libelle, typeZone: plu.zone?.typezone,
@@ -72,7 +76,16 @@ export function DashboardPage() {
             </h1>
             <p className="text-xs text-muted">France entière · MdB Dashboard</p>
           </div>
-          <div className="flex-1 w-full sm:max-w-xl">
+          <div className="flex-1 w-full sm:max-w-xl flex gap-2">
+            <select
+              value={propertyType}
+              onChange={(e) => setPropertyType(e.target.value)}
+              className="input w-36 shrink-0"
+            >
+              <option value="maison">Maison</option>
+              <option value="appartement">Appartement</option>
+              <option value="terrain">Terrain</option>
+            </select>
             <AddressSearch onSearch={handleAddressSearch} loading={plu.status === 'loading'} />
           </div>
         </div>
@@ -148,7 +161,7 @@ export function DashboardPage() {
 
               {activeTab === 'marche' && (
                 <div className="space-y-5">
-                  <PrixMarche lon={plu.geo?.lon} lat={plu.geo?.lat} citycode={citycode} commune={communeNom} />
+                  <PrixMarche lon={plu.geo?.lon} lat={plu.geo?.lat} commune={communeNom} citycode={citycode} propertyType={propertyType} />
                   {!synthese && (
                     <button onClick={() => handleSynthese(null, null)} disabled={loadingSynthese}
                       className="btn-primary text-xs disabled:opacity-40">
@@ -172,16 +185,22 @@ export function DashboardPage() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <div className="lg:col-span-2">
-                      <TradeSelector selected={trades} onChange={setTrades} />
+                      <TradeSelector selected={trades} onChange={setTrades} source={source} onSourceChange={setSource} />
                     </div>
-                    <div className="flex items-end">
+                    <div className="flex items-end gap-2">
                       <button onClick={handleArtisanSearch}
                         disabled={!trades.length || artisans.status === 'loading'}
-                        className="btn-primary w-full disabled:opacity-40">
+                        className="btn-primary flex-1 disabled:opacity-40">
                         {artisans.status === 'loading' ? '⏳ Recherche…' : '🔍 Trouver les artisans'}
+                      </button>
+                      <button onClick={() => setDebugMode((d) => !d)}
+                        title="Mode debug"
+                        className={`px-3 py-2 text-xs rounded-md border transition-colors ${debugMode ? 'border-amber/40 text-amber bg-amber/8' : 'border-border text-muted hover:text-dim'}`}>
+                        ⚙
                       </button>
                     </div>
                   </div>
+                  <DebugPanel data={artisans.debugData} />
                   <ArtisansTable
                     artisans={artisans.results}
                     loading={artisans.status === 'loading'}

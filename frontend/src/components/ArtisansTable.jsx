@@ -116,17 +116,23 @@ export function ArtisansTable({ artisans, loading, error }) {
                   </div>
                 </td>
                 <td className="py-2 px-3">
-                  {a.siteWeb
-                    ? <a href={a.siteWeb} target="_blank" rel="noopener" className="text-blue hover:underline text-[10px]">↗ site</a>
-                    : <span className="text-muted">—</span>
-                  }
+                  <div className="flex flex-col gap-0.5">
+                    {a.siteWeb && <a href={a.siteWeb} target="_blank" rel="noopener" className="text-blue hover:underline text-[10px]">↗ site</a>}
+                    {a.rge && <span className="text-[10px] font-mono text-green bg-green/10 border border-green/20 px-1 rounded">RGE ✓</span>}
+                    {!a.siteWeb && !a.rge && <span className="text-muted">—</span>}
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="text-xs text-muted">Source : Pappers (RCS) · Contacts RCS — données déclaratives, peuvent être obsolètes</p>
+      <p className="text-xs text-muted">
+        {sorted[0]?.source === 'rge'    && 'Source : RGE ADEME · Certifications à jour'}
+        {sorted[0]?.source === 'sirene' && 'Source : SIRENE INSEE + RGE ADEME · Données officielles, sans contact direct'}
+        {sorted[0]?.source === 'pappers'&& 'Source : Pappers (RCS) · Données déclaratives, peuvent être obsolètes'}
+        {!sorted[0]?.source             && 'Source : SIRENE INSEE + Pappers fusionnés'}
+      </p>
     </div>
   );
 }

@@ -23,6 +23,9 @@ async function get(path, params = {}) {
 // ── Pappers (via backend proxy) ───────────────────────────
 export const searchArtisans = (body) => post('/api/pappers/search', body);
 
+// ── SIRENE / recherche-entreprises.api.gouv.fr (gratuit) ──
+export const searchSirene = (body, debug = false) => post('/api/sirene/search', { ...body, debug });
+
 // ── Claude (via backend) ──────────────────────────────────
 export const interpretZone  = (body) => post('/api/claude/interpret-zone', body);
 export const refineSearch   = (body) => post('/api/claude/refine-search', body);

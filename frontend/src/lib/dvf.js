@@ -1,33 +1,20 @@
 // DVF — Demandes de Valeurs Foncières
-// Proxifié via le backend pour éviter les problèmes CORS/DNS de l'API CEREMA
+// Proxifié via le backend (cascade Etalab → CEREMA → ODS)
 
 /**
  * Fetch recent transactions near a point — France entière
+ * Returns { transactions, source }
  */
-export async function fetchTransactions(lon, lat, citycode, radiusM = 1500, months = 12) {
-  const params = new URLSearchParams({ lon, lat, citycode, radius: radiusM, months });
+export async function fetchTransactions(lon, lat, radiusM = 1500, months = 24, citycode = null) {
+  const params = new URLSearchParams({ lon, lat, radius: radiusM, months, debug: 1 });
+  if (citycode) params.set('citycode', citycode);
   const r = await fetch(`/api/dvf?${params}`);
+  const d = await r.json().catch(() => ({}));
   if (!r.ok) {
-    const err = await r.json().catch(() => ({}));
-    throw new Error(err.detail || `DVF HTTP ${r.status}`);
+    const err = Object.assign(new Error(d.detail || `DVF HTTP ${r.status}`), { debugLog: d.debugLog });
+    throw err;
   }
-  const d = await r.json();
-  const features = d.features || d.results || [];
-  const all = parseFeatures(features);
-
-  // L'API CEREMA ignore date_mutation_min — on filtre côté client
-  const since = new Date();
-  since.setMonth(since.getMonth() - months);
-  return all.filter((t) => {
-    if (t.date) return new Date(t.date) >= since;
-    if (t.anneemut) return t.anneemut >= since.getFullYear();
-    return true;
-  });
-}
-
-function safeFloat(v) {
-  const n = parseFloat(v);
-  return isNaN(n) ? 0 : n;
+  return { transactions: d.transactions || [], source: d.source || 'DVF', debugLog: d.debugLog || [] };
 }
 
 export function normalizeType(raw) {
@@ -36,25 +23,6 @@ export function normalizeType(raw) {
   if (t.includes('appart') || ['2','12','121','122'].includes(t))        return 'appartement';
   if (t.includes('terrain') || t.includes('dépend') || t.includes('depend')) return 'terrain';
   return 'autre';
-}
-
-function parseFeatures(features) {
-  if (features.length) console.debug('[DVF] sample feature:', features[0]?.properties || features[0]);
-  return features
-    .map((f) => {
-      const p = f.properties || f;
-      return {
-        valeur:         safeFloat(p.valeur_fonciere ?? p.valfonc ?? p.prix),
-        surfaceBati:    safeFloat(p.surface_reelle_bati ?? p.sbati ?? p.surface_bati),
-        surfaceTerrain: safeFloat(p.surface_terrain ?? p.sterr ?? p.surface_fonciere),
-        typeLocal:      p.type_local || p.libtypbien || p.codtypbien || '—',
-        date:           p.datemut || p.date_mutation || p.date || '',
-        anneemut:       Number(p.anneemut || p.annee_mutation) || null,
-        commune:        p.nom_commune || p.commune || '',
-        codePostal:     p.code_postal || p.coddep || '',
-      };
-    })
-    .filter((t) => t.valeur > 0);
 }
 
 // ── Stats computation — pure JS ───────────────────────────
