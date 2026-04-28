@@ -13,8 +13,8 @@ import sireneRouter  from './routes/sirene.js';
 
 // Charge .env.local à la racine du monorepo (priorité), puis .env
 const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: resolve(__dirname, '../../../.env.local') });
-dotenv.config({ path: resolve(__dirname, '../../../.env') });
+dotenv.config({ path: resolve(__dirname, '../../.env.local') });
+dotenv.config({ path: resolve(__dirname, '../../.env') });
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -39,5 +39,12 @@ app.get('/health', (_, res) => res.json({ ok: true, ts: new Date().toISOString()
 export default app;
 
 if (!process.env.VERCEL) {
-  app.listen(PORT, () => console.log(`🚀 Backend on http://localhost:${PORT}`));
+  app.listen(PORT, () => {
+    console.log(`Backend http://localhost:${PORT}`);
+    console.log(`  VERCEL=${process.env.VERCEL || '(unset)'}`);
+    console.log(`  NODE_ENV=${process.env.NODE_ENV || '(unset)'}`);
+    console.log(`  .env chargé depuis: ${resolve(__dirname, '../../.env')}`);
+  });
+} else {
+  console.log(`Backend démarré en mode Vercel (serverless, pas de listen)`);
 }

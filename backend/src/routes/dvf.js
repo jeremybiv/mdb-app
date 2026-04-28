@@ -10,10 +10,17 @@ import { cacheGet, cacheSet } from '../lib/memcache.js';
 // Fallbacks : CEREMA apidf.cerema.fr · OpenDataSoft v1
 
 const __dvfDir = dirname(fileURLToPath(import.meta.url));
-const CSV_CACHE_DIR = join(__dvfDir, '../../cache/dvf');
+// Vercel (et autres lambdas) ont un FS en lecture seule — seul /tmp est writable
+const CSV_CACHE_DIR = process.env.VERCEL
+  ? '/tmp/dvf-cache'
+  : join(__dvfDir, '../../cache/dvf');
 
 function ensureCacheDir() {
-  if (!existsSync(CSV_CACHE_DIR)) mkdirSync(CSV_CACHE_DIR, { recursive: true });
+  try {
+    if (!existsSync(CSV_CACHE_DIR)) mkdirSync(CSV_CACHE_DIR, { recursive: true });
+  } catch (e) {
+    console.warn(`DVF cache dir unavailable: ${e.message}`);
+  }
 }
 
 function csvCachePath(year, dept, citycode) {
@@ -79,8 +86,12 @@ async function fetchDvfCommune(citycode, dateMin, debug) {
       if (r.status === 404) { console.warn(`DVF commune ${year}: 404`); continue; }
       if (!r.ok) { console.warn(`DVF commune ${year}: HTTP ${r.status}`); continue; }
       text = await r.text();
-      writeFileSync(cached, text, 'utf-8');
-      console.log(`DVF téléchargé et mis en cache: ${year}/${citycode} (${text.length} octets)`);
+      try {
+        writeFileSync(cached, text, 'utf-8');
+        console.log(`DVF téléchargé et mis en cache: ${year}/${citycode} (${text.length} octets)`);
+      } catch (we) {
+        console.warn(`DVF disk write skipped: ${we.message}`);
+      }
     }
 
     allTransactions.push(...parseDvfCsv(text, dateMin));
@@ -320,6 +331,7 @@ const router = express.Router();
 
 router.get('/', async (req, res) => {
   const { lon, lat, radius = 1500, months = 12, debug, citycode } = req.query;
+  console.log(`[DVF] requête reçue — lon=${lon} lat=${lat} citycode=${citycode} VERCEL=${process.env.VERCEL || 'non'} CSV_CACHE_DIR=${CSV_CACHE_DIR}`);
   if (!lon || !lat) return res.status(400).json({ detail: 'lon et lat requis' });
   try {
     const result = await fetchTransactions(+lon, +lat, +radius, +months, true, citycode || null);

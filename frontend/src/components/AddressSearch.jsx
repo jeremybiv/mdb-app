@@ -16,7 +16,6 @@ export function AddressSearch({ onSearch, loading }) {
         value={address}
         onChange={(e) => setAddress(e.target.value)}
         disabled={loading}
-        className="width-full input"
       />
       <button
         type="submit"
