@@ -1,5 +1,5 @@
 import { searchRGE, RGE_DOMAINES } from '../../lib/sirene.js';
-import { handleCors } from '../../lib/claude.js';
+import { handleCors } from '../../lib/claude.mjs';
 
 // GET /api/sirene/rge?departement=01&domaine=Chauffage+et%2Fou+ECS
 export default async function handler(req, res) {

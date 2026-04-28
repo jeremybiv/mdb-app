@@ -1,6 +1,6 @@
 import { searchAndScore, NAF_BY_TRADE } from '../../lib/sirene.js';
-import { cacheArtisan, logRecherche } from '../../lib/kv.js';
-import { handleCors } from '../../lib/claude.js';
+import { cacheArtisan, logRecherche } from '../../lib/kv.mjs';
+import { handleCors } from '../../lib/claude.mjs';
 
 export default async function handler(req, res) {
   if (handleCors(req, res)) return;

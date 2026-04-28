@@ -6,10 +6,10 @@
     "api/index.mjs": {
       "includeFiles": "backend/src/**"
     },
-    "api/sirene/search.js": {
+    "api/sirene/search.mjs": {
       "includeFiles": "backend/src/services/kv.js,lib/**"
     },
-    "api/sirene/rge.js": {
+    "api/sirene/rge.mjs": {
       "includeFiles": "lib/**"
     }
   },
