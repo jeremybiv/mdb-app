@@ -86,11 +86,14 @@ async function fromCommune(citycode, dateMin) {
   const dept = deptFrom(citycode);
   ensureCacheDir();
   const sinceYear = new Date(dateMin).getFullYear();
-  const now = new Date().getFullYear();
+  // DVF millesimes are published with a lag — current year is never available yet.
+  // Start 1 year before sinceYear to cover late-published millesimes.
+  const startYear = Math.max(sinceYear - 1, 2019);
+  const endYear   = new Date().getFullYear() - 1;
   const all = [];
   let lastUrl = '';
 
-  for (let year = sinceYear; year <= now; year++) {
+  for (let year = startYear; year <= endYear; year++) {
     const url = `https://files.data.gouv.fr/geo-dvf/latest/csv/${year}/communes/${dept}/${citycode}.csv`;
     const cp  = cachePath(year, dept, citycode);
     lastUrl   = url;
