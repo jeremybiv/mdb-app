@@ -119,7 +119,12 @@ export function ArtisansTable({ artisans, loading, error }) {
                   <div className="flex flex-col gap-0.5">
                     {a.siteWeb && <a href={a.siteWeb} target="_blank" rel="noopener" className="text-blue hover:underline text-[10px]">↗ site</a>}
                     {a.rge && <span className="text-[10px] font-mono text-green bg-green/10 border border-green/20 px-1 rounded">RGE ✓</span>}
-                    {!a.siteWeb && !a.rge && <span className="text-muted">—</span>}
+                    <a
+                      href={`https://www.google.com/search?q=${encodeURIComponent(`"${a.nom}" ${a.ville} artisan`)}`}
+                      target="_blank" rel="noopener"
+                      className="text-muted hover:text-dim text-[10px]"
+                      title="Rechercher sur Google"
+                    >🔍 Google</a>
                   </div>
                 </td>
               </tr>

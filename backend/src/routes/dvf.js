@@ -2,6 +2,7 @@ import express from 'express';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { cacheGet, cacheSet } from '../lib/memcache.js';
 
 // DVF — Demandes de Valeurs Foncières
 // Source principale : fichiers CSV géolocalisés par commune
@@ -109,8 +110,9 @@ function parseDvfCsv(text, dateMin) {
   const iNumero  = col('adresse_numero');
   const iSuffix  = col('adresse_suffixe');
   const iVoie    = col('adresse_nom_voie');
-  const iLat     = col('latitude');
-  const iLon     = col('longitude');
+  const iLat      = col('latitude');
+  const iLon      = col('longitude');
+  const iParcelle = col('id_parcelle');
 
   const mutations = new Map();
 
@@ -139,16 +141,20 @@ function parseDvfCsv(text, dateMin) {
         adresse,
         lat:            +c[iLat] || null,
         lon:            +c[iLon] || null,
+        idParcelle:     c[iParcelle] || null,
       });
     }
-    const m = mutations.get(id);
-    m.surfaceBati    += +c[iBati]    || 0;
+    const m    = mutations.get(id);
+    const bati = +c[iBati] || 0;
+    m.surfaceBati    += bati;
     m.surfaceTerrain += +c[iTerrain] || 0;
     // Keep most descriptive typeLocal (prefer Maison/Appartement over Dépendance/'—')
     if (!m.typeLocal || m.typeLocal === '—' || m.typeLocal === 'Dépendance') {
       const t = c[iType];
       if (t && t !== 'Dépendance') m.typeLocal = t;
     }
+    // Prefer parcel ID from the built lot (not terrain/pré)
+    if (bati > 0 && c[iParcelle]) m.idParcelle = c[iParcelle];
   }
 
   return [...mutations.values()].filter(isValid);
@@ -234,6 +240,14 @@ export async function fetchTransactions(lon, lat, radiusM = 1500, months = 24, d
   since.setMonth(since.getMonth() - months);
   const dateMin = since.toISOString().split('T')[0];
 
+  // Cache mémoire — clé = commune + période (12h TTL)
+  const cacheKey = `dvf_${citycode || `${lon},${lat}`}_${dateMin}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) {
+    console.log(`DVF cache hit: ${cacheKey}`);
+    return cached;
+  }
+
   const log = [];
 
   // ── 1. Commune CSV (source principale si citycode dispo) ──
@@ -248,7 +262,9 @@ export async function fetchTransactions(lon, lat, radiusM = 1500, months = 24, d
       log.push(attempt);
       if (result.transactions.length > 0) {
         console.log(`DVF: commune ${citycode} → ${result.transactions.length} transactions`);
-        return { transactions: result.transactions, source: `DVF commune ${citycode}`, debug: log };
+        const out = { transactions: result.transactions, source: `DVF commune ${citycode}`, debug: log };
+        cacheSet(cacheKey, out, 12 * 3_600_000); // 12h
+        return out;
       }
       console.warn(`DVF: commune ${citycode} → 0 résultats`);
     } catch (e) {
@@ -277,7 +293,9 @@ export async function fetchTransactions(lon, lat, radiusM = 1500, months = 24, d
       log.push(attempt);
       if (result.transactions.length > 0) {
         console.log(`DVF: ${src.name} → ${result.transactions.length} transactions`);
-        return { transactions: result.transactions, source: src.name, debug: log };
+        const out = { transactions: result.transactions, source: src.name, debug: log };
+        cacheSet(cacheKey, out, 12 * 3_600_000); // 12h
+        return out;
       }
       console.warn(`DVF: ${src.name} → 0 résultats`);
     } catch (e) {

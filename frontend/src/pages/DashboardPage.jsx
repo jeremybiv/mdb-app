@@ -1,21 +1,21 @@
 import { useState } from 'react';
 import { AddressSearch } from '../components/AddressSearch.jsx';
 import { ApiSteps } from '../components/ApiSteps.jsx';
-import { ZoneCard } from '../components/ZoneCard.jsx';
-import { PrixMarche } from '../components/PrixMarche.jsx';
-import { SocioEco } from '../components/SocioEco.jsx';
-import { RisquesMdb } from '../components/RisquesMdb.jsx';
 import { ArtisansTable } from '../components/ArtisansTable.jsx';
-import { TradeSelector } from '../components/TradeSelector.jsx';
 import { DebugPanel } from '../components/DebugPanel.jsx';
-import { usePLU } from '../hooks/usePLU.js';
+import { PrixMarche } from '../components/PrixMarche.jsx';
+import { RisquesMdb } from '../components/RisquesMdb.jsx';
+import { SocioEco } from '../components/SocioEco.jsx';
+import { TradeSelector } from '../components/TradeSelector.jsx';
+import { ZoneCard } from '../components/ZoneCard.jsx';
 import { useArtisans } from '../hooks/useArtisans.js';
+import { usePLU } from '../hooks/usePLU.js';
 import { getSyntheseMarche } from '../lib/api.js';
 
 const TABS = [
   { key: 'zone',      label: '🗺 Zone PLU' },
   { key: 'marche',    label: '💶 Marché' },
-  { key: 'socio',     label: '👥 Socio-éco' },
+  // { key: 'socio',     label: '👥 Socio-éco' },
   { key: 'artisans',  label: '🔧 Artisans' },
   { key: 'risques',   label: '⚖️ Risques MdB' },
 ];
@@ -41,7 +41,9 @@ export function DashboardPage() {
   const handleArtisanSearch = () => {
     const dept = plu.geo?.citycode?.substring(0, 2) || '01';
     artisans.search({
-      trades, source, debug: debugMode, departement: dept,
+      trades, source, debug: debugMode,
+      departement: dept,
+      citycode: plu.geo?.citycode,
       adresse: plu.geo?.label,
       lat: plu.geo?.lat, lon: plu.geo?.lon,
       zonePlu: plu.zone?.libelle, typeZone: plu.zone?.typezone,
@@ -72,9 +74,9 @@ export function DashboardPage() {
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-3">
           <div className="flex-shrink-0">
             <h1 className="font-mono text-sm font-semibold text-bright">
-              PLUiH <span className="text-muted">+</span> Market Intel
+              MDB <span className="text-muted">+</span> Recherche & analyse assiste par IA
             </h1>
-            <p className="text-xs text-muted">France entière · MdB Dashboard</p>
+            <p className="text-xs text-muted">France entière ·  Dashboard</p>
           </div>
           <div className="flex-1 w-full sm:max-w-xl flex gap-2">
             <select
@@ -145,7 +147,7 @@ export function DashboardPage() {
 
               {activeTab === 'zone' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                  <ZoneCard zone={plu.zone} doc={plu.doc} geo={plu.geo} />
+                  <ZoneCard zone={plu.zone} doc={plu.doc} geo={plu.geo} commune={communeNom} />
                   {/* Claude synthèse */}
                   {(synthese || loadingSynthese) ? (
                     <div className="card">
@@ -162,7 +164,7 @@ export function DashboardPage() {
               {activeTab === 'marche' && (
                 <div className="space-y-5">
                   <PrixMarche lon={plu.geo?.lon} lat={plu.geo?.lat} commune={communeNom} citycode={citycode} propertyType={propertyType} />
-                  {!synthese && (
+{/*                   {!synthese && (
                     <button onClick={() => handleSynthese(null, null)} disabled={loadingSynthese}
                       className="btn-primary text-xs disabled:opacity-40">
                       {loadingSynthese ? '⏳ Génération…' : '✦ Générer le brief marché Claude'}
@@ -173,13 +175,13 @@ export function DashboardPage() {
                       <p className="label mb-3">Brief marché · Claude</p>
                       <p className="text-sm text-dim leading-relaxed">{synthese}</p>
                     </div>
-                  )}
+                  )} */}
                 </div>
               )}
 
-              {activeTab === 'socio' && (
+{/*               {activeTab === 'socio' && (
                 <SocioEco citycode={citycode} communeNom={communeNom} />
-              )}
+              )} */}
 
               {activeTab === 'artisans' && (
                 <div className="space-y-4">

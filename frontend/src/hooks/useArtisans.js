@@ -15,6 +15,7 @@ export function useArtisans() {
     async ({
       trades,
       departement,
+      citycode,
       codePostal,
       region,
       adresse,
@@ -23,7 +24,7 @@ export function useArtisans() {
       zonePlu,
       typeZone,
       source = "sirene", // 'pappers' | 'sirene' | 'both'
-    debug = false,
+      debug = false,
     }) => {
       if (!trades?.length) return;
       setState({
@@ -93,6 +94,7 @@ export function useArtisans() {
           const data = await searchSirene({
             trades,
             departement,
+            citycode,
             region,
             codePostal,
             adresse,

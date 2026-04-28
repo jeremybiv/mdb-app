@@ -12,10 +12,11 @@ export function AddressSearch({ onSearch, loading }) {
     <form onSubmit={handleSubmit} className="flex gap-2">
       <input
         className="input flex-1"
-        placeholder="ex: 331 rue des Faneurs, 01170 Gex"
+        placeholder="ex: 10 rue de la Paix, Paris"
         value={address}
         onChange={(e) => setAddress(e.target.value)}
         disabled={loading}
+        className="width-full input"
       />
       <button
         type="submit"

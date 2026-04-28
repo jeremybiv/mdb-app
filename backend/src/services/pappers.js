@@ -6,21 +6,24 @@ const KEY = process.env.PAPPERS_API_KEY;
 if (!KEY) console.warn('⚠  PAPPERS_API_KEY not set — Pappers routes will fail');
 
 // ── NAF codes by trade ────────────────────────────────────
+// NAF codes — précision maximale pour éviter les résultats hors-sujet
+// 4322A = eau/gaz uniquement  |  4322B = thermique/climatisation uniquement
+// 4329A = isolation           |  4391A = charpente  |  4391B = couverture
 export const NAF_BY_TRADE = {
-  plomberie:       ['4322A', '4322B'],
-  chauffage:       ['4322B', '4322A'],
+  plomberie:       ['4322A'],               // Eau, gaz, sanitaire — PAS thermique
+  chauffage:       ['4322B'],               // Thermique, chaudière, poêle
+  climatisation:   ['4322B'],               // PAC, clim — même code que chauffage
   electricite:     ['4321A', '4321B'],
-  maconnerie:      ['4312A', '4391B', '4399C'],
+  maconnerie:      ['4120A', '4120B', '4399C'],
   charpente:       ['4391A'],
-  couverture:      ['4391A'],
-  menuiserie:      ['4332A', '4332B'],
+  couverture:      ['4391B'],               // Couverture par éléments (tuiles, ardoises)
+  menuiserie:      ['4332A', '4332B', '4335Z'],
   peinture:        ['4334Z'],
-  isolation:       ['4391B'],
-  terrassement:    ['4312A', '4211Z'],
+  isolation:       ['4329A'],               // Isolation thermique et acoustique (pas 4391B)
+  terrassement:    ['4312A', '4312B'],
   architecture:    ['7111Z'],
   geometre:        ['7112B'],
   demolition:      ['4311Z'],
-  climatisation:   ['4322B'],
 };
 
 // ── Scoring grid ──────────────────────────────────────────

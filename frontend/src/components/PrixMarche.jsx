@@ -8,7 +8,9 @@ const TYPES = [
 ];
 
 function filterByType(transactions, typeKey) {
-  if (typeKey === 'terrain') return transactions.filter((t) => t.surfaceBati < 10 && t.surfaceTerrain > 0);
+  if (typeKey === 'terrain')     return transactions.filter((t) => t.surfaceBati < 10 && t.surfaceTerrain > 0);
+  if (typeKey === 'maison')      return transactions.filter((t) => normalizeType(t.typeLocal) === 'maison' && t.surfaceBati > 0);
+  if (typeKey === 'appartement') return transactions.filter((t) => normalizeType(t.typeLocal) === 'appartement' && t.surfaceBati > 0);
   return transactions.filter((t) => normalizeType(t.typeLocal) === typeKey);
 }
 
@@ -181,16 +183,18 @@ export function PrixMarche({ lon, lat, commune, citycode, propertyType = 'maison
                     {recentSales.map((t, i) => {
                       const surf = activeType === 'terrain' ? t.surfaceTerrain : (t.surfaceBati || t.surfaceTerrain);
                       const ppm2 = surf > 0 ? Math.round(t.valeur / surf) : null;
-                      const exploreUrl = t.lat && t.lon
-                        ? `https://explore.data.gouv.fr/immobilier#17/${t.lat}/${t.lon}`
-                        : null;
+                      const exploreUrl = t.idParcelle
+                        ? `https://explore.data.gouv.fr/fr/immobilier?code=${t.idParcelle}&level=parcelle&onglet=carte`
+                        : t.lat && t.lon
+                          ? `https://explore.data.gouv.fr/fr/immobilier?lat=${t.lat.toFixed(5)}&lng=${t.lon.toFixed(5)}&zoom=18.00&onglet=carte`
+                          : null;
                       return (
                         <tr key={i} className="border-b border-border/40 hover:bg-border/20">
                           <td className="py-1.5 pr-3 font-mono text-dim whitespace-nowrap">{t.date?.substring(0, 7) || '—'}</td>
                           <td className="py-1.5 pr-3 text-dim max-w-[180px]">
                             {t.adresse ? (
                               <span className="block truncate" title={`${t.adresse}, ${t.codePostal} ${t.commune}`}>
-                                {t.adresse}
+                                {t.adresse.toLowerCase().replace(/\b\w/g, c => c.toUpperCase())}
                               </span>
                             ) : <span className="text-muted">—</span>}
                             {exploreUrl && (

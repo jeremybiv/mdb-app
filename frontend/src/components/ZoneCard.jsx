@@ -2,7 +2,26 @@ import { matchZone } from '../lib/zones.js';
 import { useState } from 'react';
 import { interpretZone } from '../lib/api.js';
 
-export function ZoneCard({ zone, doc, geo }) {
+function MdLite({ text }) {
+  const bold = (s) => {
+    const parts = s.split(/\*\*(.+?)\*\*/g);
+    return parts.map((p, i) => i % 2 === 1 ? <strong key={i} className="text-text font-semibold">{p}</strong> : p);
+  };
+  return (
+    <div className="space-y-1.5 text-sm text-dim leading-relaxed">
+      {text.split('\n').map((line, i) => {
+        if (!line.trim()) return <div key={i} className="h-1" />;
+        if (/^\*\*\d+\./.test(line))
+          return <p key={i} className="font-semibold text-text mt-3 mb-1">{bold(line)}</p>;
+        if (line.startsWith('- '))
+          return <p key={i} className="pl-3 before:content-['·'] before:mr-2 before:text-blue">{bold(line.slice(2))}</p>;
+        return <p key={i}>{bold(line)}</p>;
+      })}
+    </div>
+  );
+}
+
+export function ZoneCard({ zone, doc, geo, commune }) {
   const libelle = zone.libelle || zone.typezone || '—';
   const info = matchZone(libelle);
   const badgeClass = info
@@ -19,6 +38,7 @@ export function ZoneCard({ zone, doc, geo }) {
         zone: libelle,
         typeZone: zone.typezone,
         destDomi: zone.destdomi,
+        commune,
       });
       setAnalysis(data.analysis);
     } catch {
@@ -73,7 +93,7 @@ export function ZoneCard({ zone, doc, geo }) {
       {analysis && (
         <div className="bg-blue/5 border border-blue/15 rounded-md p-4">
           <p className="label mb-2">Analyse réglementaire · Claude</p>
-          <p className="text-sm text-dim whitespace-pre-wrap leading-relaxed">{analysis}</p>
+          <MdLite text={analysis} />
         </div>
       )}
 

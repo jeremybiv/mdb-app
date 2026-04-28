@@ -4,14 +4,15 @@ Web app pour consulter le zonage PLUiH d'une adresse et trouver des artisans loc
 
 ## Stack
 
-| Layer | Tech |
+|Layer|Tech|
 |---|---|
-| Frontend | Vite + React + Tailwind |
-| Backend  | Node.js + Express |
-| DB       | Airtable |
-| PLU API  | IGN GPU (direct browser, pas de proxy) |
-| Artisans | Pappers API (via backend proxy) |
-| IA       | Anthropic Claude (interprétation zone + NL search) |
+|Frontend|Vite + React + Tailwind|
+|Backend|Node.js + Express|
+|DB|Airtable|
+|PLU API|IGN GPU (direct browser, pas de proxy)|
+|Artisans|SIRENE INSEE / Pappers API|
+|DVF|files.data.gouv.fr (CSV commune, cache disque)|
+|IA|Anthropic Claude (interprétation zone + NL search)|
 
 ## Ce qui tourne côté browser (pas d'IA, pas de backend)
 
@@ -23,7 +24,9 @@ Web app pour consulter le zonage PLUiH d'une adresse et trouver des artisans loc
 
 ## Ce qui passe par le backend
 
+- SIRENE `recherche-entreprises.api.gouv.fr` (cascade commune → voisines → dept)
 - Pappers API (clé cachée, CORS)
+- DVF CSV par commune (cache disque `backend/cache/dvf/`)
 - Claude API (clé cachée)
 - Airtable read (token caché)
 
@@ -33,14 +36,10 @@ Web app pour consulter le zonage PLUiH d'une adresse et trouver des artisans loc
 
 ```bash
 cp .env.example .env
-# Remplir les 5 variables
+# Remplir les variables
 ```
 
-### 2. Airtable
-
-Voir `AIRTABLE_SETUP.md` pour créer les 2 tables.
-
-### 3. Install + run
+### 2. Install + run
 
 ```bash
 npm install
@@ -49,21 +48,61 @@ npm run dev
 # Backend  : http://localhost:3001
 ```
 
-### 4. Build prod
+### 3. Build prod
 
 ```bash
 npm run build
-# Static files dans frontend/dist/
-npm start  # Lance le backend
+npm start
 ```
 
-## Architecture décision : Pappers clé + Claude
+## Système de notation artisans (P1 → P4)
 
-`PAPPERS_API_KEY` et `ANTHROPIC_API_KEY` sont uniquement dans le backend Express.
-Le frontend ne les voit jamais. Le proxy Express ajoute la clé à chaque requête.
+Chaque artisan reçoit un **score** calculé à partir de signaux de fiabilité.
+La **priorité** (P1–P4) est déduite du score et de la présence de contact direct.
+
+### Grille de points
+
+|Signal|Points|
+|---|---|
+|CA > 500 k€|+30|
+|CA 200–500 k€|+20|
+|CA 100–200 k€|+10|
+|Effectif ≥ 10|+25|
+|Effectif 3–9|+20|
+|Effectif 1–2|+10|
+|Email disponible|+20|
+|Téléphone disponible|+15|
+|Entreprise créée avant 2020|+2 pts/an (max +20)|
+|Résultat net positif|+10|
+|Plusieurs établissements ouverts|+5|
+
+### Seuils de priorité
+
+|Priorité|Condition|Signification|
+|---|---|---|
+|**P1**|Score ≥ 55 **et** contact direct|Artisan établi — contacter en premier|
+|**P2**|Score ≥ 35|Bonne structure, à contacter|
+|**P3**|Score ≥ 20|Entreprise jeune ou peu documentée|
+|**P4**|Score < 20|Peu d'informations disponibles|
+
+> **Source SIRENE** : score simplifié (effectif + ancienneté, pas de CA). Email/site non fournis — lien de recherche Google disponible dans le tableau.
+> **Source Pappers** : score complet (CA, bilans, contacts directs).
+
+## Artisans — cascade géographique
+
+1. **Commune** (code postal INSEE) — résultats immédiats si artisans locaux
+2. **Communes voisines** — élargissement si < 3 résultats (`geo.api.gouv.fr/communes-limitrophes`)
+3. **Département** — fallback si toujours < 3 résultats
+
+## DVF — données de transactions
+
+- Source : `files.data.gouv.fr/geo-dvf/latest/csv/{year}/communes/{dept}/{citycode}.csv`
+- Période : 12 derniers mois (années 2024 + 2025)
+- Cache disque : `backend/cache/dvf/` — re-téléchargement uniquement si fichier absent
+- Lien parcelle : `explore.data.gouv.fr/fr/immobilier?code={id_parcelle}&level=parcelle`
 
 ## Airtable flows
 
 - Chaque résultat Pappers → upsert dans table `Artisans` (par SIREN)
 - Chaque recherche → log dans table `Recherches`
-- `/api/airtable/artisans` → lecture des artisans sauvegardés (historique)
+- `/api/cache/artisans` → lecture des artisans sauvegardés (historique)

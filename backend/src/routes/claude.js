@@ -5,10 +5,25 @@ import { NAF_BY_TRADE } from "../services/pappers.js";
 const router = Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const SYSTEM = `Tu es un expert en droit de l'urbanisme français et en opérations de marchands de biens (MdB).
-Tu maîtrises : PLU/PLUiH, TVA sur marge, division parcellaire, permis de construire, DP, contentieux administratifs,
-recours des tiers, ABF, servitudes, fiscalité immobilière, bail locatif.
-Réponds toujours en français, directement et de façon opérationnelle, sans préambule.`;
+const SYSTEM = `Tu es un expert senior en droit de l'urbanisme français spécialisé dans les opérations de marchands de biens (MdB).
+Ton profil :
+- Tu opères en France, secteur périurbain et rural
+- Tu maîtrises : PLU/PLUiH/POS, règlement de zone, OAP, servitudes, SUP
+- Tu maîtrises : TVA sur marge, droits de mutation, fiscalité MdB, SCI/SASU
+- Tu maîtrises : division parcellaire, bornage, arpentage, géomètre-expert
+- Tu maîtrises : PC, DP, permis d'aménager, recours gracieux et contentieux
+- Tu maîtrises : ABF, ZPPAUP, AVAP, monuments historiques
+- Tu maîtrises : bail locatif, congé vente, préemption, droit de retrait
+
+RÈGLES IMPÉRATIVES :
+- Tu analyses TOUJOURS la zone demandée. Jamais de refus, jamais de "je ne peux pas sans le document".
+- Tu NE te fies JAMAIS à ta seule mémoire pour les règles PLU — tu CHERCHES toujours le document officiel
+- Tu cites TOUJOURS tes sources (article du règlement, lien GPU, date d'approbation)
+- Si une information est manquante ou incertaine, tu le dis EXPLICITEMENT
+- Les codes de zones PLU obéissent à des conventions nationales françaises : tu les connais parfaitement.
+- Tu déduis les caractéristiques typiques d'une zone à partir de son code (UA = centre dense, UB = mixte péricentral, UC = pavillonnaire, N = naturel protégé, AU = à urbaniser…) et du contexte communal.
+- Si une donnée précise est inconnue, tu fournis la fourchette réglementaire typique pour ce type de zone et l'indiques par "(typique)" — tu ne bloques jamais l'analyse.
+- Réponds en français, directement, sans préambule ni mise en garde. Format markdown autorisé.`;
 
 // ── interpret-zone ────────────────────────────────────────
 router.post("/interpret-zone", async (req, res) => {
@@ -16,19 +31,45 @@ router.post("/interpret-zone", async (req, res) => {
     const { zone, typeZone, destDomi, projetDescription, commune } = req.body;
     if (!zone) return res.status(400).json({ error: "zone required" });
 
-    const prompt = `Zone PLU : ${zone} (type: ${typeZone || "?"}, destination: ${destDomi || "?"})
-${commune ? `Commune : ${commune}` : ""}
-${projetDescription ? `Projet : ${projetDescription}` : ""}
+    const zoneCtx = [
+      `Zone PLU : **${zone}**`,
+      typeZone ? `Type réglementaire : ${typeZone}` : null,
+      destDomi ? `Destination dominante : ${destDomi}` : null,
+      commune ? `Commune : ${commune}` : null,
+      projetDescription ? `Projet envisagé : ${projetDescription}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
-Trouve le PLU applicable de la commune et analyse pour un projet de marchand de biens
-3 points courts :
-1. **Constructibilité** : autorisé / interdit
-2. **Contraintes** : emprise, hauteur, matériaux, reculs
-3. **Artisans nécessaires** pour ce type de projet`;
+    const prompt = `${zoneCtx}
+
+Tu es mandaté par un marchand de biens pour analyser cette zone avant acquisition. Produis une analyse opérationnelle en 3 points détaillés :
+
+**1. DROITS À CONSTRUIRE & RÈGLEMENT**
+Identifie les caractéristiques réglementaires typiques de cette zone dans ce type de commune :
+- Destinations autorisées (habitation, commerce, activité…) et interdites
+- Emprise au sol (CES) et hauteur maximale admise (en mètres et/ou niveaux)
+- Reculs obligatoires : voirie (marge de recul), limites séparatives
+- Conditions de division parcellaire (surface minimale des lots)
+- Changement de destination : possible / soumis à PC / interdit
+
+**2. STRATÉGIE MARCHAND DE BIENS**
+En fonction du règlement de cette zone, quelle(s) opération(s) sont les plus pertinentes :
+- Division + vente à la découpe : faisabilité et conditions
+- Rénovation / surélévation / extension : droits mobilisables
+- Changement de destination ou création de surface habitable : marge de manœuvre
+- Potentiel de densification : est-ce une zone favorable ou contraignante ?
+
+**3. POINTS DE VIGILANCE & RISQUES SPÉCIFIQUES**
+- Risques PLU propres à ce type de zone (inconstructibilité partielle, règles ABF probables, zones humides/inondables…)
+- Délais et procédures à anticiper (PC / DP / modification PLU)
+- 2 ou 3 questions à poser impérativement en mairie avant acquisition
+
+Conclus par une phrase de synthèse : opportunité ou prudence pour un MdB ?`;
 
     const msg = await client.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 600,
+      max_tokens: 1400,
       system: SYSTEM,
       messages: [{ role: "user", content: prompt }],
     });
