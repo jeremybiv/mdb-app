@@ -3,8 +3,14 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "npm install",
   "functions": {
-    "api/index.js": {
+    "api/index.mjs": {
       "includeFiles": "backend/src/**"
+    },
+    "api/sirene/search.js": {
+      "includeFiles": "backend/src/services/kv.js,lib/**"
+    },
+    "api/sirene/rge.js": {
+      "includeFiles": "lib/**"
     }
   },
   "rewrites": [

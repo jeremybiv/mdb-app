@@ -5,18 +5,14 @@ import { ArtisansTable }  from '../components/ArtisansTable.jsx';
 import { DebugPanel }     from '../components/DebugPanel.jsx';
 import { PrixMarche }     from '../components/PrixMarche.jsx';
 import { RisquesMdb }     from '../components/RisquesMdb.jsx';
-import { SocioEco }       from '../components/SocioEco.jsx';
 import { TradeSelector }  from '../components/TradeSelector.jsx';
 import { ZoneCard }       from '../components/ZoneCard.jsx';
 import { useArtisans }    from '../hooks/useArtisans.js';
 import { usePLU }         from '../hooks/usePLU.js';
 import { fetchTransactions, computeStats, normalizeType } from '../lib/dvf.js';
-import { fetchSocioEco, computeAttractivite } from '../lib/insee.js';
-
 const TABS = [
   { key: 'synthese',  label: 'Synthèse'   },
   { key: 'marche',    label: 'Marché DVF' },
-  { key: 'socio',     label: 'Socio-éco'  },
   { key: 'artisans',  label: 'Artisans'   },
   { key: 'risques',   label: 'Risques MdB'},
 ];
@@ -190,7 +186,6 @@ export function DashboardPage() {
   const [propertyType,    setPropertyType]   = useState('maison');
   const [dvfSummary,      setDvfSummary]     = useState(null);
   const [dvfLoading,      setDvfLoading]     = useState(false);
-  const [socioSummary,    setSocioSummary]   = useState(null);
 
   const citycode   = plu.geo?.citycode;
   const communeNom = plu.geo?.label?.split(',').pop()?.trim();
@@ -206,20 +201,10 @@ export function DashboardPage() {
       .finally(() => setDvfLoading(false));
   }, [plu.geo?.lon, plu.geo?.lat, citycode]);
 
-  // Auto-fetch SocioEco summary
-  useEffect(() => {
-    if (!citycode) return;
-    setSocioSummary(null);
-    fetchSocioEco(citycode, communeNom)
-      .then(profile => setSocioSummary({ profile, score: computeAttractivite(profile) }))
-      .catch(() => setSocioSummary(null));
-  }, [citycode]);
-
   const handleAddressSearch = (address) => {
     plu.reset();
     artisans.reset();
     setDvfSummary(null);
-    setSocioSummary(null);
     setActiveTab('synthese');
     plu.lookup(address);
   };
@@ -333,11 +318,8 @@ export function DashboardPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
                   {/* Zone PLU */}
                   {plu.zone && <ZoneCard zone={plu.zone} doc={plu.doc} geo={plu.geo} commune={communeNom} />}
-                  {/* DVF + Socio stacked */}
-                  <div className="flex flex-col gap-2.5">
-                    <DvfMiniCard stats={dvfSummary} loading={dvfLoading} />
-                    <SocioMiniCard socio={socioSummary} commune={communeNom} />
-                  </div>
+                  {/* DVF */}
+                  <DvfMiniCard stats={dvfSummary} loading={dvfLoading} />
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
                   <ArtisansTopCard artisans={artisans.results}
@@ -352,13 +334,6 @@ export function DashboardPage() {
               <div className="fade-in">
                 <PrixMarche lon={plu.geo?.lon} lat={plu.geo?.lat} commune={communeNom}
                   citycode={citycode} propertyType={propertyType} />
-              </div>
-            )}
-
-            {/* ── Socio-éco ─────────────────────── */}
-            {activeTab === 'socio' && (
-              <div className="fade-in">
-                <SocioEco citycode={citycode} communeNom={communeNom} />
               </div>
             )}
 

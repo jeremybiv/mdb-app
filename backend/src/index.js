@@ -19,6 +19,8 @@ dotenv.config({ path: resolve(__dirname, '../../.env') });
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
+app.set('trust proxy', 1);
+
 const corsOrigin = process.env.VERCEL
   ? true
   : (process.env.FRONTEND_URL || ((o, cb) => cb(null, /^http:\/\/localhost(:\d+)?$/.test(o || ''))));
