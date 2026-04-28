@@ -3,10 +3,10 @@ import { TRADES } from '../lib/zones.js';
 const SOURCES = [
   { key: 'sirene', label: 'SIRENE + RGE', badge: 'Gratuit', color: 'green',
     desc: 'INSEE officiel + certifications ADEME. Sans clé API.' },
-  { key: 'pappers', label: 'Pappers', badge: 'Payant', color: 'blue',
+  /*{ key: 'pappers', label: 'Pappers', badge: 'Payant', color: 'blue',
     desc: 'Données financières (CA, bilans). Nécessite une clé API.' },
   { key: 'both', label: 'Les deux fusionnés', badge: 'Recommandé', color: 'amber',
-    desc: 'SIRENE enrichi par Pappers quand disponible. Meilleure couverture.' },
+    desc: 'SIRENE enrichi par Pappers quand disponible. Meilleure couverture.' }*/,
 ];
 
 export function TradeSelector({ selected, onChange, source = 'sirene', onSourceChange }) {

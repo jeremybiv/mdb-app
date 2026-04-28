@@ -15,7 +15,7 @@ export function ArtisansTable({ artisans, loading, error }) {
   if (loading) return (
     <div className="card">
       <p className="label mb-3">Recherche en cours…</p>
-      <div className="flex items-center gap-2"><span className="dot-spin" /><span className="text-sm text-dim">Interrogation Pappers…</span></div>
+      <div className="flex items-center gap-2"><span className="dot-spin" /><span className="text-sm text-dim">Interrogation service gouv</span></div>
     </div>
   );
 
