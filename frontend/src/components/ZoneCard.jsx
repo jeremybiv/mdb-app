@@ -21,14 +21,29 @@ function MdLite({ text }) {
   );
 }
 
+// Essaie d'extraire CES et hauteur depuis la description de zone
+function parseZoneMetrics(info) {
+  const ces     = info?.desc?.match(/CES\s*([\d,]+)/i)?.[1] || info?.desc?.match(/([\d]+)%/)?.[1];
+  const hauteur = info?.desc?.match(/R\+(\d)/i)?.[1]
+    ? `R+${info.desc.match(/R\+(\d)/i)[1]}`
+    : info?.desc?.match(/(\d+)\s*m/i)?.[1]
+      ? `${info.desc.match(/(\d+)\s*m/i)[1]} m`
+      : null;
+  return { ces: ces ? `${ces}%` : null, hauteur };
+}
+
 export function ZoneCard({ zone, doc, geo, commune }) {
   const libelle = zone.libelle || zone.typezone || '—';
-  const info = matchZone(libelle);
-  const badgeClass = info
-    ? `badge-${info.color} text-2xl px-4 py-1.5 rounded-md inline-block mb-3`
-    : 'badge-dim text-2xl px-4 py-1.5 rounded-md inline-block mb-3';
+  const info    = matchZone(libelle);
+  const metrics = parseZoneMetrics(info);
 
-  const [analysis, setAnalysis] = useState(null);
+  const typeLabel = info?.label || zone.typezone || null;
+  const typeColor = info?.color === 'green' ? 'pill-green'
+    : info?.color === 'amber' ? 'pill-amber'
+    : info?.color === 'red'   ? 'pill-red'
+    : 'pill-gray';
+
+  const [analysis,  setAnalysis]  = useState(null);
   const [loadingAI, setLoadingAI] = useState(false);
 
   const handleInterpret = async () => {
@@ -49,57 +64,81 @@ export function ZoneCard({ zone, doc, geo, commune }) {
 
   return (
     <div className="card fade-in space-y-4">
-      <p className="label">Zone PLUiH identifiée</p>
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2">
+        <p className="section-label">Zone PLU</p>
+        <span className="source-tag">IGN GPU</span>
+      </div>
 
-      <div>
-        <div className={badgeClass}>{libelle}</div>
-        {info && (
-          <div>
-            <p className="text-sm font-medium text-bright mb-1">{info.label}</p>
-            <p className="text-sm text-dim">{info.desc}</p>
-            {info.warning && (
-              <p className="text-xs text-amber mt-1">⚠ CU informatif recommandé avant tout projet</p>
-            )}
-            {!info.constructible && (
-              <p className="text-xs text-red mt-1 font-medium">⚠ Zone inconstructible</p>
-            )}
-          </div>
+      {/* Zone badge + type */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="zone-badge">{libelle}</span>
+        {typeLabel && <span className={`pill ${typeColor}`}>{typeLabel}</span>}
+        {!info?.constructible && (
+          <span className="pill pill-red">Inconstructible</span>
+        )}
+        {info?.warning && (
+          <span className="pill pill-amber">CU conseillé</span>
         )}
       </div>
 
-      {/* Metadata grid */}
-      <div className="grid grid-cols-2 gap-2">
+      {/* Description */}
+      {info?.desc && (
+        <p className="text-xs text-dim leading-relaxed">{info.desc}</p>
+      )}
+
+      {/* Metrics grid */}
+      {(metrics.ces || metrics.hauteur) && (
+        <>
+          <hr className="border-border" />
+          <div className="grid grid-cols-2 gap-2">
+            {metrics.ces && (
+              <div className="card-sm">
+                <p className="text-[10px] text-muted mb-1">Emprise sol (typ.)</p>
+                <p className="text-base font-medium">{metrics.ces}</p>
+              </div>
+            )}
+            {metrics.hauteur && (
+              <div className="card-sm">
+                <p className="text-[10px] text-muted mb-1">Hauteur max (typ.)</p>
+                <p className="text-base font-medium">{metrics.hauteur}</p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Metadata compact */}
+      <div className="grid grid-cols-2 gap-1.5 text-[11px]">
         {[
-          { k: 'Type de zone', v: zone.typezone || libelle },
-          { k: 'Destination dominante', v: zone.destdomi || '—' },
-          { k: 'Coordonnées', v: geo ? `${geo.lon.toFixed(5)}, ${geo.lat.toFixed(5)}` : '—' },
-          { k: 'Partition GPU', v: zone.partition || '—' },
-          { k: 'Document', v: doc?.nom || 'PLUiH CCPG' },
-          { k: 'Approuvé', v: doc?.datappro || '27/02/2020' },
+          { k: 'Type', v: zone.typezone || libelle },
+          { k: 'Destination', v: zone.destdomi || '—' },
+          { k: 'Document', v: doc?.nom || 'PLUiH' },
+          { k: 'Approuvé', v: doc?.datappro || '—' },
         ].map(({ k, v }) => (
-          <div key={k} className="bg-ink border border-border rounded p-2.5">
-            <p className="label mb-1">{k}</p>
-            <p className="font-mono text-xs text-text">{v}</p>
+          <div key={k} className="flex gap-1">
+            <span className="text-muted shrink-0">{k} :</span>
+            <span className="text-dim truncate">{v}</span>
           </div>
         ))}
       </div>
 
       {/* Claude analysis */}
-      {!analysis && (
-        <button onClick={handleInterpret} disabled={loadingAI} className="btn-primary text-xs disabled:opacity-40">
-          {loadingAI ? '⏳ Analyse Claude en cours…' : '✦ Interpréter la zone avec Claude'}
+      {!analysis ? (
+        <button onClick={handleInterpret} disabled={loadingAI}
+          className="w-full text-left text-xs px-3 py-2.5 bg-ink border border-border rounded-md text-dim hover:border-blue/30 hover:text-text transition-colors disabled:opacity-40">
+          {loadingAI
+            ? <span className="flex items-center gap-2"><span className="dot-spin" />Analyse Claude en cours…</span>
+            : 'Analyser avec Claude (PLU officiel) →'}
         </button>
-      )}
-      {analysis && (
-        <div className="bg-blue/5 border border-blue/15 rounded-md p-4">
-          <p className="label mb-2">Analyse réglementaire · Claude</p>
+      ) : (
+        <div className="bg-blue/5 border border-blue/15 rounded-md p-3.5">
+          <p className="section-label mb-2">Analyse réglementaire · Claude</p>
           <MdLite text={analysis} />
         </div>
       )}
 
-      <p className="text-xs text-muted">
-        Source : API Carto IGN · PLUiH CCPG approuvé 27/02/2020 · Données indicatives — vérification mairie recommandée
-      </p>
+      <p className="text-[10px] text-muted">API Carto IGN · Données indicatives — vérifier en mairie</p>
     </div>
   );
 }

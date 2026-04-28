@@ -1,40 +1,226 @@
-import { useState } from 'react';
-import { AddressSearch } from '../components/AddressSearch.jsx';
-import { ApiSteps } from '../components/ApiSteps.jsx';
-import { ArtisansTable } from '../components/ArtisansTable.jsx';
-import { DebugPanel } from '../components/DebugPanel.jsx';
-import { PrixMarche } from '../components/PrixMarche.jsx';
-import { RisquesMdb } from '../components/RisquesMdb.jsx';
-import { SocioEco } from '../components/SocioEco.jsx';
-import { TradeSelector } from '../components/TradeSelector.jsx';
-import { ZoneCard } from '../components/ZoneCard.jsx';
-import { useArtisans } from '../hooks/useArtisans.js';
-import { usePLU } from '../hooks/usePLU.js';
-import { getSyntheseMarche } from '../lib/api.js';
+import { useState, useEffect } from 'react';
+import { AddressSearch }  from '../components/AddressSearch.jsx';
+import { ApiSteps }       from '../components/ApiSteps.jsx';
+import { ArtisansTable }  from '../components/ArtisansTable.jsx';
+import { DebugPanel }     from '../components/DebugPanel.jsx';
+import { PrixMarche }     from '../components/PrixMarche.jsx';
+import { RisquesMdb }     from '../components/RisquesMdb.jsx';
+import { SocioEco }       from '../components/SocioEco.jsx';
+import { TradeSelector }  from '../components/TradeSelector.jsx';
+import { ZoneCard }       from '../components/ZoneCard.jsx';
+import { useArtisans }    from '../hooks/useArtisans.js';
+import { usePLU }         from '../hooks/usePLU.js';
+import { fetchTransactions, computeStats, normalizeType } from '../lib/dvf.js';
+import { fetchSocioEco, computeAttractivite } from '../lib/insee.js';
 
 const TABS = [
-  { key: 'zone',      label: '🗺 Zone PLU' },
-  { key: 'marche',    label: '💶 Marché' },
-  // { key: 'socio',     label: '👥 Socio-éco' },
-  { key: 'artisans',  label: '🔧 Artisans' },
-  { key: 'risques',   label: '⚖️ Risques MdB' },
+  { key: 'synthese',  label: 'Synthèse'   },
+  { key: 'marche',    label: 'Marché DVF' },
+  { key: 'socio',     label: 'Socio-éco'  },
+  { key: 'artisans',  label: 'Artisans'   },
+  { key: 'risques',   label: 'Risques MdB'},
 ];
 
+// ── Mini composants Synthèse ──────────────────────────────
+
+function DvfMiniCard({ stats, loading }) {
+  if (loading) return (
+    <div className="card flex items-center gap-2 py-3">
+      <span className="dot-spin" /><span className="text-xs text-dim">Chargement DVF…</span>
+    </div>
+  );
+  if (!stats?.bati) return (
+    <div className="card py-3">
+      <p className="section-label mb-2">Prix marché DVF</p>
+      <p className="text-xs text-muted">Aucune donnée sur 12 mois</p>
+    </div>
+  );
+  const { median, count } = stats.bati;
+  const evo = stats.evolutionPct;
+  const spark = stats.sparkline || [];
+  const maxSpark = Math.max(...spark.map(s => s.median), 1);
+  return (
+    <div className="card">
+      <p className="section-label mb-2">Prix marché DVF</p>
+      <div className="flex items-baseline gap-2">
+        <span className="text-2xl font-medium">{median?.toLocaleString('fr-FR')}</span>
+        <span className="text-sm text-dim">€/m²</span>
+        {evo != null && (
+          <span className={`pill ml-auto ${evo >= 0 ? 'pill-green' : 'pill-red'}`}>
+            {evo > 0 ? '+' : ''}{evo}%
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-muted mt-1">{count} transactions · 12 mois</p>
+      {spark.length > 1 && (
+        <div className="flex items-end gap-0.5 h-7 mt-2.5">
+          {spark.map((s, i) => {
+            const h = Math.max(15, Math.round((s.median / maxSpark) * 100));
+            const isLast = i === spark.length - 1;
+            return (
+              <div key={s.year} title={`${s.year}: ${s.median?.toLocaleString('fr-FR')}€/m²`}
+                className={`flex-1 rounded-t-sm ${isLast ? 'bg-blue' : 'bg-blue/30'}`}
+                style={{ height: `${h}%` }} />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SocioMiniCard({ socio, commune }) {
+  if (!socio) return (
+    <div className="card py-3">
+      <p className="section-label mb-2">Socio-éco · {commune || '—'}</p>
+      <p className="text-xs text-muted">Chargement…</p>
+    </div>
+  );
+  const { profile, score } = socio;
+  const revenu   = profile?.revenus?.medianDisponible;
+  const proprio  = profile?.logement?.tauxProprietaires;
+  const scoreColor = score >= 70 ? 'text-green' : score >= 45 ? 'text-amber' : 'text-red';
+  const barColor   = score >= 70 ? 'bg-green' : score >= 45 ? 'bg-amber' : 'bg-red';
+  return (
+    <div className="card">
+      <p className="section-label mb-2">Socio-éco · {commune || '—'}</p>
+      <div className="flex gap-2 mb-3">
+        {revenu && (
+          <div className="card-sm flex-1 text-center">
+            <div className="text-sm font-medium">{(revenu / 1000).toFixed(0)} k€</div>
+            <div className="text-[10px] text-muted mt-0.5">Revenu médian</div>
+          </div>
+        )}
+        {proprio != null && (
+          <div className="card-sm flex-1 text-center">
+            <div className="text-sm font-medium">{proprio}%</div>
+            <div className="text-[10px] text-muted mt-0.5">Propriétaires</div>
+          </div>
+        )}
+      </div>
+      <div>
+        <div className="flex justify-between text-xs mb-1">
+          <span className="text-muted">Score attractivité</span>
+          <span className={`font-medium ${scoreColor}`}>{score} / 100</span>
+        </div>
+        <div className="bar-wrap">
+          <div className={`bar-fill ${barColor}`} style={{ width: `${score}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ArtisansTopCard({ artisans, onSearch }) {
+  const top3 = (artisans || []).slice(0, 3);
+  const AVATAR_COLORS = [
+    'bg-blue/15 text-blue',
+    'bg-amber/15 text-amber',
+    'bg-green/15 text-green',
+  ];
+  if (!top3.length) return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <p className="section-label">Artisans</p>
+        <span className="source-tag">SIRENE + RGE</span>
+      </div>
+      <p className="text-xs text-muted mb-3">Aucune recherche lancée</p>
+      <button onClick={onSearch} className="btn-primary text-xs w-full">Trouver les artisans →</button>
+    </div>
+  );
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-2">
+        <p className="section-label">Artisans · top {top3.length}</p>
+        <span className="source-tag">SIRENE + RGE</span>
+      </div>
+      {top3.map((a, i) => {
+        const initials = (a.nom || '?').split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+        return (
+          <div key={a.siren || i} className="artisan-row">
+            <div className={`avatar ${AVATAR_COLORS[i % AVATAR_COLORS.length]}`}>{initials}</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{a.nom}</p>
+              <p className="text-[11px] text-muted truncate">{a.naf ? `NAF ${a.naf}` : ''} · {a.ville || '—'}{a.effectif ? ` · ${a.effectif} sal.` : ''}</p>
+            </div>
+            <div className="text-right shrink-0">
+              <span className={`pill ${a.priorite === 'P1' ? 'pill-green' : a.priorite === 'P2' ? 'pill-blue' : 'pill-amber'}`}>
+                {a.priorite || 'P3'}
+              </span>
+              <p className="text-[10px] text-muted mt-1">{a.score} pts</p>
+            </div>
+          </div>
+        );
+      })}
+      <button onClick={onSearch} className="text-xs text-blue hover:underline mt-2">Voir tous les artisans →</button>
+    </div>
+  );
+}
+
+function RisquesMiniCard({ onOpen }) {
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <p className="section-label">Risques MdB</p>
+      </div>
+      <p className="text-xs text-muted mb-3">Analyse juridique, fiscale et réglementaire de l'opération envisagée.</p>
+      <button onClick={onOpen} className="btn-primary text-xs w-full">Analyser les risques →</button>
+    </div>
+  );
+}
+
+// ── DashboardPage ─────────────────────────────────────────
 export function DashboardPage() {
-  const plu = usePLU();
+  const plu      = usePLU();
   const artisans = useArtisans();
-  const [trades, setTrades] = useState([]);
-  const [source, setSource] = useState('sirene');
-  const [debugMode, setDebugMode] = useState(false);
-  const [activeTab, setActiveTab] = useState('zone');
-  const [propertyType, setPropertyType] = useState('maison');
-  const [synthese, setSynthese] = useState(null);
-  const [loadingSynthese, setLoadingSynthese] = useState(false);
+  const [trades,          setTrades]         = useState([]);
+  const [source,          setSource]         = useState('sirene');
+  const [debugMode,       setDebugMode]      = useState(false);
+  const [activeTab,       setActiveTab]      = useState('synthese');
+  const [darkMode,        setDarkMode]       = useState(
+    () => document.documentElement.classList.contains('dark')
+  );
+
+  const toggleTheme = () => {
+    const next = !darkMode;
+    setDarkMode(next);
+    document.documentElement.classList.toggle('dark', next);
+    localStorage.setItem('theme', next ? 'dark' : 'light');
+  };
+  const [propertyType,    setPropertyType]   = useState('maison');
+  const [dvfSummary,      setDvfSummary]     = useState(null);
+  const [dvfLoading,      setDvfLoading]     = useState(false);
+  const [socioSummary,    setSocioSummary]   = useState(null);
+
+  const citycode   = plu.geo?.citycode;
+  const communeNom = plu.geo?.label?.split(',').pop()?.trim();
+
+  // Auto-fetch DVF summary when address is resolved
+  useEffect(() => {
+    if (!plu.geo?.lon || !citycode) return;
+    setDvfSummary(null);
+    setDvfLoading(true);
+    fetchTransactions(plu.geo.lon, plu.geo.lat, 1500, 12, citycode)
+      .then(({ transactions }) => setDvfSummary(computeStats(transactions)))
+      .catch(() => setDvfSummary(null))
+      .finally(() => setDvfLoading(false));
+  }, [plu.geo?.lon, plu.geo?.lat, citycode]);
+
+  // Auto-fetch SocioEco summary
+  useEffect(() => {
+    if (!citycode) return;
+    setSocioSummary(null);
+    fetchSocioEco(citycode, communeNom)
+      .then(profile => setSocioSummary({ profile, score: computeAttractivite(profile) }))
+      .catch(() => setSocioSummary(null));
+  }, [citycode]);
 
   const handleAddressSearch = (address) => {
     plu.reset();
     artisans.reset();
-    setSynthese(null);
+    setDvfSummary(null);
+    setSocioSummary(null);
+    setActiveTab('synthese');
     plu.lookup(address);
   };
 
@@ -48,170 +234,164 @@ export function DashboardPage() {
       lat: plu.geo?.lat, lon: plu.geo?.lon,
       zonePlu: plu.zone?.libelle, typeZone: plu.zone?.typezone,
     });
+    setActiveTab('artisans');
   };
-
-  const handleSynthese = async (dvfStats, socioProfile) => {
-    setLoadingSynthese(true);
-    try {
-      const d = await getSyntheseMarche({
-        zone: plu.zone?.libelle,
-        commune: plu.geo?.label?.split(' ').pop(),
-        dvfStats, socioProfile,
-        operationType: 'MdB division/valorisation',
-      });
-      setSynthese(d.synthese);
-    } catch { setSynthese(null); }
-    setLoadingSynthese(false);
-  };
-
-  const citycode = plu.geo?.citycode;
-  const communeNom = plu.geo?.label?.split(',').pop()?.trim();
 
   return (
     <div className="min-h-screen bg-ink">
-      {/* Header */}
-      <header className="border-b border-border px-6 py-4 sticky top-0 bg-ink/95 backdrop-blur z-10">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center gap-3">
-          <div className="flex-shrink-0">
-            <h1 className="font-mono text-sm font-semibold text-bright">
-              MDB <span className="text-muted">+</span> Recherche & analyse assiste par IA
-            </h1>
-            <p className="text-xs text-muted">France entière ·  Dashboard</p>
+
+      {/* ── Header ─────────────────────────────── */}
+      <header className="border-b border-border px-5 py-3.5 sticky top-0 bg-ink/95 backdrop-blur z-10">
+        <div className="max-w-5xl mx-auto flex items-center gap-3">
+          <div className="w-8 h-8 rounded-md bg-blue flex items-center justify-center shrink-0">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="8" width="4" height="6" rx="1" fill="white"/>
+              <rect x="6" y="5" width="4" height="9" rx="1" fill="white" opacity=".7"/>
+              <rect x="10" y="2" width="4" height="12" rx="1" fill="white" opacity=".5"/>
+            </svg>
           </div>
-          <div className="flex-1 w-full sm:max-w-xl flex gap-2">
-            <select
-              value={propertyType}
-              onChange={(e) => setPropertyType(e.target.value)}
-              className="input w-36 shrink-0"
-            >
+          <div className="shrink-0">
+            <p className="text-sm font-medium text-bright leading-tight">MdB Intelligence</p>
+            <p className="text-[11px] text-muted">Analyse foncière · France entière</p>
+          </div>
+          <div className="flex-1 flex items-center gap-2 max-w-xl">
+            <select value={propertyType} onChange={e => setPropertyType(e.target.value)}
+              className="input w-32 text-xs shrink-0 py-1.5">
               <option value="maison">Maison</option>
               <option value="appartement">Appartement</option>
               <option value="terrain">Terrain</option>
             </select>
             <AddressSearch onSearch={handleAddressSearch} loading={plu.status === 'loading'} />
           </div>
+          <span className="pill pill-green shrink-0 hidden sm:inline-flex">
+            <span className="dot dot-g" />3 APIs actives
+          </span>
+          <button onClick={toggleTheme} title={darkMode ? 'Mode clair' : 'Mode sombre'}
+            className="p-1.5 rounded-md text-muted hover:text-dim hover:bg-border/40 transition-colors shrink-0">
+            {darkMode ? (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+              </svg>
+            )}
+          </button>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-5">
+      <main className="max-w-5xl mx-auto px-4 sm:px-5 py-5 space-y-4">
 
-        {/* API steps while loading */}
+        {/* Loading */}
         {plu.status === 'loading' && <ApiSteps steps={plu.steps} />}
 
+        {/* Error */}
         {plu.status === 'error' && (
           <div className="card border-red/20">
             <p className="text-red text-sm">⚠ {plu.error}</p>
-            <div className="mt-2 text-xs text-muted space-x-3">
-              <a href="https://www.geoportail-urbanisme.gouv.fr" target="_blank" rel="noopener" className="text-blue hover:underline">Géoportail ↗</a>
-            </div>
+            <a href="https://www.geoportail-urbanisme.gouv.fr" target="_blank" rel="noopener"
+              className="text-xs text-blue hover:underline mt-1 block">Géoportail →</a>
           </div>
         )}
 
-        {/* Geo header when done */}
-        {plu.status === 'done' && (
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="font-mono text-xs text-blue bg-blue/8 border border-blue/15 px-3 py-1.5 rounded-md">
-              📍 {plu.geo?.label}
-            </div>
-            {plu.zone && (
-              <div className="font-mono text-xs text-amber bg-amber/8 border border-amber/15 px-3 py-1.5 rounded-md">
-                Zone {plu.zone.libelle}
-              </div>
-            )}
-            {plu.geo && (
-              <div className="font-mono text-xs text-muted">
-                {plu.geo.lon.toFixed(5)}, {plu.geo.lat.toFixed(5)}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tabs */}
+        {/* Content */}
         {plu.status === 'done' && (
           <>
-            <div className="flex gap-1 border-b border-border overflow-x-auto">
-              {TABS.map((t) => (
+            {/* Geo context bar */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="pill pill-blue">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1.5A4.5 4.5 0 0 0 3.5 6c0 2.9 4.5 8.5 4.5 8.5S12.5 8.9 12.5 6A4.5 4.5 0 0 0 8 1.5Zm0 6a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/>
+                </svg>
+                {plu.geo?.label}
+              </span>
+              {plu.zone && (
+                <span className="pill pill-amber">Zone {plu.zone.libelle}</span>
+              )}
+              <span className="text-xs text-muted font-mono ml-auto hidden sm:block">
+                {plu.geo?.lon.toFixed(5)}, {plu.geo?.lat.toFixed(5)}
+              </span>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex gap-0 border-b border-border overflow-x-auto -mb-1">
+              {TABS.map(t => (
                 <button key={t.key} onClick={() => setActiveTab(t.key)}
-                  className={`px-4 py-2 text-xs font-medium whitespace-nowrap transition-colors border-b-2 -mb-px ${
-                    activeTab === t.key
-                      ? 'text-blue border-blue'
-                      : 'text-dim border-transparent hover:text-text'
-                  }`}>
+                  className={`tab ${activeTab === t.key ? 'active' : ''}`}>
                   {t.label}
                 </button>
               ))}
             </div>
 
-            {/* Tab content */}
-            <div className="space-y-5">
-
-              {activeTab === 'zone' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                  <ZoneCard zone={plu.zone} doc={plu.doc} geo={plu.geo} commune={communeNom} />
-                  {/* Claude synthèse */}
-                  {(synthese || loadingSynthese) ? (
-                    <div className="card">
-                      <p className="label mb-3">Brief marché · Claude</p>
-                      {loadingSynthese
-                        ? <div className="flex items-center gap-2"><span className="dot-spin" /><span className="text-sm text-dim">Synthèse en cours…</span></div>
-                        : <p className="text-sm text-dim leading-relaxed">{synthese}</p>
-                      }
-                    </div>
-                  ) : null}
-                </div>
-              )}
-
-              {activeTab === 'marche' && (
-                <div className="space-y-5">
-                  <PrixMarche lon={plu.geo?.lon} lat={plu.geo?.lat} commune={communeNom} citycode={citycode} propertyType={propertyType} />
-{/*                   {!synthese && (
-                    <button onClick={() => handleSynthese(null, null)} disabled={loadingSynthese}
-                      className="btn-primary text-xs disabled:opacity-40">
-                      {loadingSynthese ? '⏳ Génération…' : '✦ Générer le brief marché Claude'}
-                    </button>
-                  )}
-                  {synthese && (
-                    <div className="card">
-                      <p className="label mb-3">Brief marché · Claude</p>
-                      <p className="text-sm text-dim leading-relaxed">{synthese}</p>
-                    </div>
-                  )} */}
-                </div>
-              )}
-
-{/*               {activeTab === 'socio' && (
-                <SocioEco citycode={citycode} communeNom={communeNom} />
-              )} */}
-
-              {activeTab === 'artisans' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    <div className="lg:col-span-2">
-                      <TradeSelector selected={trades} onChange={setTrades} source={source} onSourceChange={setSource} />
-                    </div>
-                    <div className="flex items-end gap-2">
-                      <button onClick={handleArtisanSearch}
-                        disabled={!trades.length || artisans.status === 'loading'}
-                        className="btn-primary flex-1 disabled:opacity-40">
-                        {artisans.status === 'loading' ? '⏳ Recherche…' : '🔍 Trouver les artisans'}
-                      </button>
-                      <button onClick={() => setDebugMode((d) => !d)}
-                        title="Mode debug"
-                        className={`px-3 py-2 text-xs rounded-md border transition-colors ${debugMode ? 'border-amber/40 text-amber bg-amber/8' : 'border-border text-muted hover:text-dim'}`}>
-                        ⚙
-                      </button>
-                    </div>
+            {/* ── Synthèse ──────────────────────── */}
+            {activeTab === 'synthese' && (
+              <div className="space-y-2.5 fade-in">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                  {/* Zone PLU */}
+                  {plu.zone && <ZoneCard zone={plu.zone} doc={plu.doc} geo={plu.geo} commune={communeNom} />}
+                  {/* DVF + Socio stacked */}
+                  <div className="flex flex-col gap-2.5">
+                    <DvfMiniCard stats={dvfSummary} loading={dvfLoading} />
+                    <SocioMiniCard socio={socioSummary} commune={communeNom} />
                   </div>
-                  <DebugPanel data={artisans.debugData} />
-                  <ArtisansTable
-                    artisans={artisans.results}
-                    loading={artisans.status === 'loading'}
-                    error={artisans.error}
-                  />
                 </div>
-              )}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+                  <ArtisansTopCard artisans={artisans.results}
+                    onSearch={() => setActiveTab('artisans')} />
+                  <RisquesMiniCard onOpen={() => setActiveTab('risques')} />
+                </div>
+              </div>
+            )}
 
-              {activeTab === 'risques' && (
+            {/* ── Marché DVF ────────────────────── */}
+            {activeTab === 'marche' && (
+              <div className="fade-in">
+                <PrixMarche lon={plu.geo?.lon} lat={plu.geo?.lat} commune={communeNom}
+                  citycode={citycode} propertyType={propertyType} />
+              </div>
+            )}
+
+            {/* ── Socio-éco ─────────────────────── */}
+            {activeTab === 'socio' && (
+              <div className="fade-in">
+                <SocioEco citycode={citycode} communeNom={communeNom} />
+              </div>
+            )}
+
+            {/* ── Artisans ──────────────────────── */}
+            {activeTab === 'artisans' && (
+              <div className="space-y-4 fade-in">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-2">
+                    <TradeSelector selected={trades} onChange={setTrades}
+                      source={source} onSourceChange={setSource} />
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <button onClick={handleArtisanSearch}
+                      disabled={!trades.length || artisans.status === 'loading'}
+                      className="btn-primary flex-1 disabled:opacity-40">
+                      {artisans.status === 'loading' ? 'Recherche…' : 'Trouver les artisans'}
+                    </button>
+                    <button onClick={() => setDebugMode(d => !d)} title="Debug"
+                      className={`px-3 py-2 text-xs rounded-md border transition-colors ${debugMode ? 'border-amber/40 text-amber bg-amber/8' : 'border-border text-muted hover:text-dim'}`}>
+                      ⚙
+                    </button>
+                  </div>
+                </div>
+                <DebugPanel data={artisans.debugData} />
+                <ArtisansTable artisans={artisans.results}
+                  loading={artisans.status === 'loading'}
+                  error={artisans.error} />
+              </div>
+            )}
+
+            {/* ── Risques MdB ───────────────────── */}
+            {activeTab === 'risques' && (
+              <div className="fade-in">
                 <RisquesMdb
                   zone={plu.zone?.libelle}
                   typeZone={plu.zone?.typezone}
@@ -220,8 +400,8 @@ export function DashboardPage() {
                   departement={plu.geo?.citycode?.substring(0, 2)}
                   geo={plu.geo}
                 />
-              )}
-            </div>
+              </div>
+            )}
           </>
         )}
       </main>
