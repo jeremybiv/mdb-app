@@ -6,6 +6,33 @@ import { cacheGet, cacheSet } from "../lib/memcache.js";
 const router = Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Récupère un JSON potentiellement tronqué (max_tokens atteint)
+function parseJsonSafe(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Tente de fermer le JSON tronqué : supprime le dernier objet incomplet et ferme les tableaux/objets ouverts
+    let s = text;
+    // Retire le dernier objet partiel (commence par { sans } fermant)
+    const lastComma = s.lastIndexOf(',');
+    if (lastComma !== -1) s = s.slice(0, lastComma);
+    // Compte les accolades/crochets ouverts non fermés et ferme-les
+    let braces = 0, brackets = 0, inStr = false, esc = false;
+    for (const ch of s) {
+      if (esc)         { esc = false; continue; }
+      if (ch === '\\') { esc = true;  continue; }
+      if (ch === '"')  { inStr = !inStr; continue; }
+      if (inStr) continue;
+      if (ch === '{') braces++;
+      if (ch === '}') braces--;
+      if (ch === '[') brackets++;
+      if (ch === ']') brackets--;
+    }
+    s += ']'.repeat(Math.max(0, brackets)) + '}'.repeat(Math.max(0, braces));
+    return JSON.parse(s);
+  }
+}
+
 // Modèles : Sonnet pour analyses complexes, Haiku pour tâches simples
 const MODEL_QUALITY = "claude-sonnet-4-20250514";
 const MODEL_FAST    = "claude-haiku-4-5-20251001";
@@ -199,16 +226,17 @@ JSON only (sans markdown):
   "scoreRisqueGlobal": 0,
   "recommandationPrincipale": ""
 }
-scoreRisqueGlobal 0=très risqué → 100=très sécurisé. Max 8 risques, du plus au moins critique.`;
+scoreRisqueGlobal 0=très risqué → 100=très sécurisé. Max 6 risques, du plus au moins critique.`;
 
     const msg = await client.messages.create({
       model: MODEL_QUALITY,
-      max_tokens: 1200,
+      max_tokens: 2048,
       system: SYSTEM_EXPERT,
       messages: [{ role: "user", content: prompt }],
     });
 
-    const parsed = JSON.parse(msg.content[0].text.trim().replace(/```json|```/g, ""));
+    const raw = msg.content[0].text.trim().replace(/```json|```/g, "");
+    const parsed = parseJsonSafe(raw);
     cacheSet(cacheKey, parsed, 6 * 3_600_000);
     res.json(parsed);
   } catch (err) {

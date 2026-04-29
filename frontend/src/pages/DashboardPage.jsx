@@ -360,7 +360,8 @@ export function DashboardPage() {
                 <DebugPanel data={artisans.debugData} />
                 <ArtisansTable artisans={artisans.results}
                   loading={artisans.status === 'loading'}
-                  error={artisans.error} />
+                  error={artisans.error}
+                  done={artisans.status === 'done'} />
               </div>
             )}
 

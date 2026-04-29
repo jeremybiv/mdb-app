@@ -15,7 +15,7 @@ export function useArtisans() {
   const search = useCallback(async ({
     trades, departement, citycode, codePostal, region,
     adresse, lat, lon, zonePlu, typeZone,
-    source = "sirene",
+    source = "sirene", debug = false,
   }) => {
     if (!trades?.length) return;
     setState({ status: "loading", results: [], count: 0, source: null, error: null });
@@ -37,7 +37,7 @@ export function useArtisans() {
         const data = await searchArtisans({ trades, departement, codePostal, adresse, lat, lon, zonePlu, typeZone });
         results = data.results || [];
       } else {
-        results = await searchAndScore({ trades, departement, region, codePostal });
+        results = await searchAndScore({ trades, departement, region, codePostal, debug });
       }
 
       setState({ status: "done", results, count: results.length, source, error: null, debugData: null });

@@ -26,21 +26,37 @@ const TRADE_TO_RGE = {
   menuiserie:  "Fenêtres et portes",
 };
 
-const toNaf = (naf) => naf.replace('.', '');
+const toNaf = (naf) => naf; // l'API attend le format avec point : '43.22A'
 
-async function searchSirene({ nafCodes, departement, region, codePostal, perPage = 25 }) {
-  const p = new URLSearchParams({
-    activite_principale: nafCodes.map(toNaf).join(','),
-    page: 1, per_page: perPage, etat_administratif: 'A',
-  });
-  if (departement) p.set('departement', departement);
-  if (region)      p.set('region', region);
-  if (codePostal)  p.set('code_postal', codePostal);
-
-  const r = await fetch(`${SIRENE_BASE}/search?${p}`);
-  if (!r.ok) throw new Error(`SIRENE HTTP ${r.status}`);
-  const d = await r.json();
-  return (d.results || []).map(parseSirene);
+// L'API accepte un seul activite_principale par requête — on parallélise et déduplique
+async function searchSirene({ nafCodes, departement, region, codePostal, perPage = 25, debug = false }) {
+  const responses = await Promise.all(
+    nafCodes.map(async naf => {
+      const p = new URLSearchParams({
+        activite_principale: toNaf(naf),
+        page: 1, per_page: perPage, etat_administratif: 'A',
+      });
+      if (departement) p.set('departement', departement);
+      if (region)      p.set('region', region);
+      if (codePostal)  p.set('code_postal', codePostal);
+      const url = `${SIRENE_BASE}/search?${p}`;
+      if (debug) console.log(`[SIRENE] GET ${url}`);
+      const r = await fetch(url);
+      if (debug) console.log(`[SIRENE] ${naf} → HTTP ${r.status}`);
+      if (!r.ok) {
+        const body = await r.text().catch(() => '');
+        if (debug) console.error(`[SIRENE] ${naf} error body:`, body);
+        throw new Error(`SIRENE HTTP ${r.status} — ${body.slice(0, 200)}`);
+      }
+      const d = await r.json();
+      if (debug) console.log(`[SIRENE] ${naf} → ${d.total_results} résultats totaux, ${(d.results||[]).length} retournés`);
+      return (d.results || []).map(parseSirene);
+    })
+  );
+  const map = new Map();
+  responses.flat().forEach(c => { if (!map.has(c.siren)) map.set(c.siren, c); });
+  if (debug) console.log(`[SIRENE] total après dédup: ${map.size}`);
+  return [...map.values()];
 }
 
 function parseSirene(r) {
@@ -70,7 +86,7 @@ function parseEffectif(t) {
   return M[t] ?? null;
 }
 
-async function searchRGE({ departement, codePostal, domaine, size = 50 }) {
+async function searchRGE({ departement, codePostal, domaine, size = 50, debug = false }) {
   const p = new URLSearchParams({
     size,
     select: 'siret,nom,adresse,code_postal,ville,telephone,email,site_internet,domaine,qualif,date_debut_validite,date_fin_validite',
@@ -81,10 +97,15 @@ async function searchRGE({ departement, codePostal, domaine, size = 50 }) {
   if (domaine)     filters.push(`domaine:"${domaine}"`);
   if (filters.length) p.set('qs', filters.join(' AND '));
 
-  const r = await fetch(`${RGE_BASE}?${p}`);
+  const url = `${RGE_BASE}?${p}`;
+  if (debug) console.log(`[RGE] GET ${url}`);
+  const r = await fetch(url);
+  if (debug) console.log(`[RGE] ${domaine} → HTTP ${r.status}`);
   if (!r.ok) throw new Error(`RGE HTTP ${r.status}`);
   const d = await r.json();
-  return (d.results || []).map(parseRGE).filter(r => !r.validiteFin || new Date(r.validiteFin) >= new Date());
+  const valid = (d.results || []).map(parseRGE).filter(r => !r.validiteFin || new Date(r.validiteFin) >= new Date());
+  if (debug) console.log(`[RGE] ${domaine} → ${valid.length} certifications valides`);
+  return valid;
 }
 
 function parseRGE(r) {
@@ -118,18 +139,23 @@ function priority(s, hasContact) {
   return 'P4';
 }
 
-export async function searchAndScore({ trades, departement, region, codePostal }) {
+export async function searchAndScore({ trades, departement, region, codePostal, debug = false }) {
   const nafCodes = [...new Set(trades.flatMap(t => NAF_BY_TRADE[t] || []))];
+  if (debug) console.log('[searchAndScore] trades:', trades, '→ nafCodes:', nafCodes, '| dept:', departement);
   if (!nafCodes.length) throw new Error('Unknown trades');
 
-  const [sireneRes, ...rgeRes] = await Promise.allSettled([
-    searchSirene({ nafCodes, departement, region, codePostal }),
-    ...trades.filter(t => TRADE_TO_RGE[t])
-             .map(t => searchRGE({ departement, codePostal, domaine: TRADE_TO_RGE[t] })),
-  ]);
+  const companies = await searchSirene({ nafCodes, departement, region, codePostal, debug });
+  if (debug) console.log('[searchAndScore] SIRENE companies:', companies.length);
 
-  const companies = sireneRes.status === 'fulfilled' ? sireneRes.value : [];
-  const rgeFlat   = rgeRes.filter(r => r.status === 'fulfilled').flatMap(r => r.value);
+  const rgeRes = await Promise.allSettled(
+    trades.filter(t => TRADE_TO_RGE[t])
+          .map(t => searchRGE({ departement, codePostal, domaine: TRADE_TO_RGE[t], debug }))
+  );
+  const rgeFlat = rgeRes.filter(r => r.status === 'fulfilled').flatMap(r => r.value);
+  if (debug) {
+    rgeRes.forEach((r, i) => r.status === 'rejected' && console.warn('[RGE] rejected:', r.reason));
+    console.log('[searchAndScore] RGE flat:', rgeFlat.length);
+  }
 
   const rgeMap = Object.fromEntries(rgeFlat.filter(r => r.siren).map(r => [r.siren, r]));
   const merged = companies.map(c => {
@@ -149,5 +175,7 @@ export async function searchAndScore({ trades, departement, region, codePostal }
     .filter(r => r.siren && !known.has(r.siren))
     .map(r => { const s = score(r); return { ...r, score: s, priorite: priority(s, !!(r.email || r.telephone)), naf: nafCodes[0] }; });
 
-  return [...scored, ...extra].sort((a, b) => b.score - a.score);
+  const final = [...scored, ...extra].sort((a, b) => b.score - a.score);
+  if (debug) console.log('[searchAndScore] résultat final:', final.length, 'artisans');
+  return final;
 }

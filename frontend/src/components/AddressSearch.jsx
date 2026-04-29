@@ -11,7 +11,8 @@ export function AddressSearch({ onSearch, loading }) {
   return (
     <form onSubmit={handleSubmit} className="flex gap-2">
       <input
-        className="input flex-1"
+        className="input"
+        style={{ width: '280px', minWidth: '280px' }}
         placeholder="ex: 10 rue de la Paix, Paris"
         value={address}
         onChange={(e) => setAddress(e.target.value)}

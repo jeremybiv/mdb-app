@@ -8,7 +8,7 @@ function SortIcon({ dir }) {
   return <span className="text-blue">{dir === 'asc' ? '↑' : '↓'}</span>;
 }
 
-export function ArtisansTable({ artisans, loading, error }) {
+export function ArtisansTable({ artisans, loading, error, done }) {
   const [sort, setSort] = useState({ key: 'score', dir: 'desc' });
   const [filter, setFilter] = useState('');
 
@@ -26,7 +26,14 @@ export function ArtisansTable({ artisans, loading, error }) {
     </div>
   );
 
-  if (!artisans?.length) return null;
+  if (!artisans?.length) {
+    if (!done) return null;
+    return (
+      <div className="card">
+        <p className="text-sm text-muted">Aucun artisan trouvé pour ces critères. Essayez un autre département ou corps de métier.</p>
+      </div>
+    );
+  }
 
   // Filter
   const q = filter.toLowerCase();
