@@ -318,8 +318,8 @@ export function DashboardPage() {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
                   {/* Zone PLU */}
                   {plu.zone && <ZoneCard zone={plu.zone} doc={plu.doc} geo={plu.geo} commune={communeNom} />}
-                  {/* DVF */}
-                  <DvfMiniCard stats={dvfSummary} loading={dvfLoading} />
+                  {/* DVF — masqué si pas de données */}
+                  {(dvfLoading || dvfSummary?.bati) && <DvfMiniCard stats={dvfSummary} loading={dvfLoading} />}
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
                   <ArtisansTopCard artisans={artisans.results}

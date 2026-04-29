@@ -1,5 +1,6 @@
 // DVF — Demandes de Valeurs Foncières
 // Proxifié via le backend (cascade Etalab → CEREMA → ODS)
+import { authHeaders } from './api.js';
 
 /**
  * Fetch recent transactions near a point — France entière
@@ -8,7 +9,7 @@
 export async function fetchTransactions(lon, lat, radiusM = 1500, months = 24, citycode = null) {
   const params = new URLSearchParams({ lon, lat, radius: radiusM, months, debug: 1 });
   if (citycode) params.set('citycode', citycode);
-  const r = await fetch(`/api/dvf?${params}`);
+  const r = await fetch(`/api/dvf?${params}`, { headers: authHeaders() });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) {
     const err = Object.assign(new Error(d.detail || `DVF HTTP ${r.status}`), { debugLog: d.debugLog });

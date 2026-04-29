@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { LoginPage } from './components/LoginPage.jsx';
 import { DashboardPage } from './pages/DashboardPage.jsx';
 import { AddressSearch } from './components/AddressSearch.jsx';
 import { ApiSteps } from './components/ApiSteps.jsx';
@@ -8,9 +9,12 @@ import { ArtisansTable } from './components/ArtisansTable.jsx';
 import { usePLU } from './hooks/usePLU.js';
 import { useArtisans } from './hooks/useArtisans.js';
 
-// Simple tab router
 export default function App() {
-  const [mode, setMode] = useState('dashboard'); // 'simple' | 'dashboard'
+  const [authed, setAuthed] = useState(() => !!localStorage.getItem('auth_token'));
+  const [mode,   setMode]   = useState('dashboard');
+
+  if (!authed) return <LoginPage onAuth={() => setAuthed(true)} />;
+
   return mode === 'dashboard'
     ? <DashboardPage onSwitchSimple={() => setMode('simple')} />
     : <SimplePage onSwitchDash={() => setMode('dashboard')} />;

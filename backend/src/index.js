@@ -5,6 +5,7 @@ import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import './lib/axiosLogger.js';
+import authRouter, { requireAuth } from './routes/auth.js';
 import pappersRouter from './routes/pappers.js';
 import claudeRouter  from './routes/claude.js';
 import cacheRouter   from './routes/cache.js';
@@ -30,6 +31,8 @@ app.use(express.json());
 const limiter = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true });
 app.use('/api', limiter);
 
+app.use('/api/auth', authRouter);
+app.use('/api', requireAuth);
 app.use('/api/pappers', pappersRouter);
 app.use('/api/claude',  claudeRouter);
 app.use('/api/cache',   cacheRouter);
@@ -43,9 +46,8 @@ export default app;
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`Backend http://localhost:${PORT}`);
-    console.log(`  VERCEL=${process.env.VERCEL || '(unset)'}`);
-    console.log(`  NODE_ENV=${process.env.NODE_ENV || '(unset)'}`);
-    console.log(`  .env chargé depuis: ${resolve(__dirname, '../../.env')}`);
+    console.log(`  AUTH_EMAIL=${process.env.AUTH_EMAIL || '(défaut)'}`);
+    console.log(`  JWT_SECRET=${process.env.JWT_SECRET ? '✓ chargé' : '(défaut dev)'}`);
   });
 } else {
   console.log(`Backend démarré en mode Vercel (serverless, pas de listen)`);

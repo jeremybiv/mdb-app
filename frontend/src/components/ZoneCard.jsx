@@ -1,6 +1,6 @@
-import { matchZone } from '../lib/zones.js';
 import { useState } from 'react';
 import { interpretZone } from '../lib/api.js';
+import { matchZone } from '../lib/zones.js';
 
 function MdLite({ text }) {
   const bold = (s) => {
@@ -82,13 +82,12 @@ export function ZoneCard({ zone, doc, geo, commune }) {
         )}
       </div>
 
-      {/* Description */}
-      {info?.desc && (
+      {/* Description + métriques : uniquement après analyse Claude */}
+      {analysis && info?.desc && (
         <p className="text-xs text-dim leading-relaxed">{info.desc}</p>
       )}
 
-      {/* Metrics grid */}
-      {(metrics.ces || metrics.hauteur) && (
+      {analysis && (metrics.ces || metrics.hauteur) && (
         <>
           <hr className="border-border" />
           <div className="grid grid-cols-2 gap-2">
@@ -126,7 +125,7 @@ export function ZoneCard({ zone, doc, geo, commune }) {
       {/* Claude analysis */}
       {!analysis ? (
         <button onClick={handleInterpret} disabled={loadingAI}
-          className="w-full text-left text-xs px-3 py-2.5 bg-ink border border-border rounded-md text-dim hover:border-blue/30 hover:text-text transition-colors disabled:opacity-40">
+          className="btn-primary w-full text-left text-xs px-3 py-2.5 border border-border rounded-md ">
           {loadingAI
             ? <span className="flex items-center gap-2"><span className="dot-spin" />Analyse Claude en cours…</span>
             : 'Analyser avec Claude (PLU officiel) →'}
