@@ -8,20 +8,101 @@ const DEBUG_ENABLED = import.meta.env.VITE_DEBUG === 'true';
 function MdLite({ text }) {
   const bold = (s) => {
     const parts = s.split(/\*\*(.+?)\*\*/g);
-    return parts.map((p, i) => i % 2 === 1 ? <strong key={i} className="text-text font-semibold">{p}</strong> : p);
+    return parts.map((p, i) =>
+      i % 2 === 1 ? <strong key={i} className="text-text font-semibold">{p}</strong> : p
+    );
   };
-  return (
-    <div className="space-y-1.5 text-sm text-dim leading-relaxed">
-      {text.split('\n').map((line, i) => {
-        if (!line.trim()) return <div key={i} className="h-1" />;
-        if (/^\*\*\d+\./.test(line))
-          return <p key={i} className="font-semibold text-text mt-3 mb-1">{bold(line)}</p>;
-        if (line.startsWith('- '))
-          return <p key={i} className="pl-3 before:content-['·'] before:mr-2 before:text-blue">{bold(line.slice(2))}</p>;
-        return <p key={i}>{bold(line)}</p>;
-      })}
-    </div>
-  );
+
+  const lines = text.split('\n');
+  const nodes = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trim = line.trim();
+
+    if (!trim) {
+      nodes.push(<div key={i} className="h-1" />);
+      i++; continue;
+    }
+
+    if (trim === '---') {
+      nodes.push(<hr key={i} className="border-border my-2" />);
+      i++; continue;
+    }
+
+    if (line.startsWith('#### ')) {
+      nodes.push(
+        <p key={i} className="text-[11px] font-bold text-blue uppercase tracking-wider mt-4 mb-1.5 pb-1 border-b border-blue/20">
+          {line.slice(5)}
+        </p>
+      );
+      i++; continue;
+    }
+
+    if (/^\*\*\d+\./.test(line)) {
+      nodes.push(
+        <p key={i} className="font-semibold text-text mt-4 mb-1">{bold(line)}</p>
+      );
+      i++; continue;
+    }
+
+    // Table : collecter toutes les lignes consécutives commençant par |
+    if (trim.startsWith('|')) {
+      const tableLines = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const rows = tableLines
+        .filter(l => !/^\|[\s\-:|]+\|/.test(l.trim())) // skip séparateurs
+        .map(l => l.split('|').slice(1, -1).map(c => c.trim()));
+      if (rows.length > 0) {
+        const [head, ...body] = rows;
+        nodes.push(
+          <div key={`t${i}`} className="overflow-x-auto my-2 rounded border border-border">
+            <table className="w-full text-[11px] border-collapse">
+              <thead>
+                <tr className="bg-panel/60">
+                  {head.map((c, ci) => (
+                    <th key={ci} className="text-left text-muted font-semibold px-2 py-1.5 border-b border-border">
+                      {bold(c)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {body.map((row, ri) => (
+                  <tr key={ri} className={ri % 2 === 1 ? 'bg-ink/20' : ''}>
+                    {row.map((c, ci) => (
+                      <td key={ci} className="px-2 py-1.5 border-b border-border/40 text-dim align-top">
+                        {bold(c)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+      continue;
+    }
+
+    if (line.startsWith('- ')) {
+      nodes.push(
+        <p key={i} className="pl-3 before:content-['·'] before:mr-2 before:text-blue text-sm">
+          {bold(line.slice(2))}
+        </p>
+      );
+      i++; continue;
+    }
+
+    nodes.push(<p key={i} className="text-sm">{bold(line)}</p>);
+    i++;
+  }
+
+  return <div className="space-y-1 text-dim leading-relaxed">{nodes}</div>;
 }
 
 function parseZoneMetrics(info) {
@@ -142,15 +223,18 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
   const handleInterpret = async () => {
     onAnalyzeStart?.();
     setLoadingAI(true);
-    addLog(`Envoi requête Claude — zone=${libelle} commune=${commune}`);
+    const urlfic = zone?.urlfic || null;
+    addLog(`Envoi requête Claude — zone=${libelle} commune=${commune}${urlfic ? ' + PDF règlement' : ' (sans document)'}`);
     try {
       const data = await interpretZone({
         zone: libelle,
+        libelong: zone.libelong,
         typeZone: zone.typezone,
         destDomi: zone.destdomi,
+        urlfic,
         commune,
       });
-      addLog(`Réponse Claude reçue — ${data.analysis?.length} caractères${data.fromCache ? ' (cache)' : ''}`);
+      addLog(`Réponse Claude reçue — ${data.analysis?.length} caractères${data.fromCache ? ' (cache)' : ''}${data.hasDocument ? ' · analyse sur document PDF réel' : ' · valeurs typiques (pas de document)'}`);
       setAnalysis(data.analysis);
     } catch (e) {
       addLog(`Erreur Claude: ${e.message}`, 'error');
@@ -247,6 +331,16 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
       </div>
 
       {/* Claude analysis */}
+      {/* Lien PLU — toujours visible */}
+      <a href={pluUrl} target="_blank" rel="noopener"
+        className="flex items-center gap-1.5 text-[11px] text-blue hover:underline">
+        <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
+          <path d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
+        </svg>
+        {zone?.urlfic ? 'Règlement PLU officiel (PDF) ↗' : 'Consulter le PLU officiel · Géoportail Urbanisme'}
+      </a>
+
       {!analysis ? (
         <button onClick={handleInterpret} disabled={loadingAI}
           className="btn-primary w-full text-left text-xs px-3 py-2.5">
@@ -258,14 +352,6 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
         <div className="bg-blue/5 border border-blue/15 rounded-md p-3.5 space-y-3">
           <p className="section-label mb-2">Analyse réglementaire · Claude</p>
           <MdLite text={analysis} />
-          <a href={pluUrl} target="_blank" rel="noopener"
-            className="flex items-center gap-1.5 text-[11px] text-blue hover:underline pt-1">
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
-              <path d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
-            </svg>
-            {zone?.urlfic ? 'Règlement PLU officiel (PDF) ↗' : 'Consulter le PLU officiel · Géoportail Urbanisme'}
-          </a>
         </div>
       )}
 

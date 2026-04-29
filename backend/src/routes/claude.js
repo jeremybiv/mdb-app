@@ -1,7 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Router } from "express";
-import { NAF_BY_TRADE } from "../services/pappers.js";
 import { cacheGet, cacheSet } from "../lib/memcache.js";
+import { NAF_BY_TRADE } from "../services/pappers.js";
+import { getPluZoneText } from "../services/pluPdf.js";
 
 const router = Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -14,28 +15,40 @@ function parseJsonSafe(text) {
     // Tente de fermer le JSON tronqué : supprime le dernier objet incomplet et ferme les tableaux/objets ouverts
     let s = text;
     // Retire le dernier objet partiel (commence par { sans } fermant)
-    const lastComma = s.lastIndexOf(',');
+    const lastComma = s.lastIndexOf(",");
     if (lastComma !== -1) s = s.slice(0, lastComma);
     // Compte les accolades/crochets ouverts non fermés et ferme-les
-    let braces = 0, brackets = 0, inStr = false, esc = false;
+    let braces = 0,
+      brackets = 0,
+      inStr = false,
+      esc = false;
     for (const ch of s) {
-      if (esc)         { esc = false; continue; }
-      if (ch === '\\') { esc = true;  continue; }
-      if (ch === '"')  { inStr = !inStr; continue; }
+      if (esc) {
+        esc = false;
+        continue;
+      }
+      if (ch === "\\") {
+        esc = true;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = !inStr;
+        continue;
+      }
       if (inStr) continue;
-      if (ch === '{') braces++;
-      if (ch === '}') braces--;
-      if (ch === '[') brackets++;
-      if (ch === ']') brackets--;
+      if (ch === "{") braces++;
+      if (ch === "}") braces--;
+      if (ch === "[") brackets++;
+      if (ch === "]") brackets--;
     }
-    s += ']'.repeat(Math.max(0, brackets)) + '}'.repeat(Math.max(0, braces));
+    s += "]".repeat(Math.max(0, brackets)) + "}".repeat(Math.max(0, braces));
     return JSON.parse(s);
   }
 }
 
 // Modèles : Sonnet pour analyses complexes, Haiku pour tâches simples
 const MODEL_QUALITY = "claude-sonnet-4-20250514";
-const MODEL_FAST    = "claude-haiku-4-5-20251001";
+const MODEL_FAST = "claude-haiku-4-5-20251001";
 
 // ── System prompt expert (Sonnet) ─────────────────────────
 // Étendu à 1024+ tokens pour activer le prompt caching Anthropic
@@ -94,65 +107,179 @@ PROCÉDURES ADMINISTRATIVES — DÉLAIS INDICATIFS :
 
 // Prompt caching Anthropic : bloc system > 1024 tokens requis pour Sonnet (TTL 5 min, -90% sur tokens cachés)
 const SYSTEM_EXPERT = [
-  { type: "text", text: SYSTEM_EXPERT_TEXT, cache_control: { type: "ephemeral" } },
+  {
+    type: "text",
+    text: SYSTEM_EXPERT_TEXT,
+    cache_control: { type: "ephemeral" },
+  },
 ];
 
 // System prompt léger pour Haiku (tâches simples — pas de prompt caching, Haiku requiert 2048+ tokens)
-const SYSTEM_HAIKU = "Tu es un assistant spécialisé en immobilier français et marchands de biens. Réponds en français, de façon concise et directe.";
+const SYSTEM_HAIKU =
+  "Tu es un assistant spécialisé en immobilier français et marchands de biens. Réponds en français, de façon concise et directe.";
 
 // ── interpret-zone ────────────────────────────────────────
 router.post("/interpret-zone", async (req, res) => {
   try {
-    const { zone, typeZone, destDomi, projetDescription, commune } = req.body;
+    const { zone, typeZone, destDomi, libelong, urlfic, projetDescription, commune } = req.body;
     if (!zone) return res.status(400).json({ error: "zone required" });
 
-    // Cache : même zone + commune = même analyse PLU (TTL 6h)
-    const cacheKey = `claude_zone_${zone}_${(commune || "").toLowerCase()}`;
+    // Cache : clé inclut la présence du document pour ne pas mélanger analyses avec/sans PDF
+    const cacheKey = `claude_zone_v3_${zone}_${(commune || "").toLowerCase()}${urlfic ? "_doc" : ""}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json({ ...cached, fromCache: true });
 
     const zoneCtx = [
-      `Zone PLU : **${zone}**`,
-      typeZone         ? `Type réglementaire : ${typeZone}` : null,
-      destDomi         ? `Destination dominante : ${destDomi}` : null,
-      commune          ? `Commune : ${commune}` : null,
+      `Zone PLU : **${zone}**${libelong ? ` — ${libelong}` : ""}`,
+      typeZone ? `Type réglementaire : ${typeZone}` : null,
+      destDomi ? `Destination dominante : ${destDomi}` : null,
+      commune ? `Commune : ${commune}` : null,
       projetDescription ? `Projet envisagé : ${projetDescription}` : null,
-    ].filter(Boolean).join("\n");
+      `\n⚠️ Le texte du règlement PLU est fourni en fin de message. Extrais les valeurs EXACTES — ne déduis jamais une valeur typique si l'information figure dans le texte fourni. Si une donnée est absente du texte, marque **(typique — à confirmer)**.`,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const prompt = `${zoneCtx}
 
-Tu es mandaté par un marchand de biens pour analyser cette zone avant acquisition. Produis une analyse opérationnelle en 3 points détaillés :
+Tu es mandaté par un marchand de biens pour analyser cette zone avant acquisition. Produis une analyse opérationnelle structurée.
+
+FORMAT IMPÉRATIF — respecte exactement ces conventions de mise en forme :
+- Titres de blocs :  N — TITRE (jamais de ***)
+- Tableaux : format markdown | col | col | avec ligne séparatrice |---|---|
+- Listes : tirets simples -
+- Données non confirmées : marque **(typique — à confirmer)**
+- Données issues du règlement : marque **(source : doc)**
 
 **1. DROITS À CONSTRUIRE & RÈGLEMENT**
-Identifie les caractéristiques réglementaires typiques de cette zone dans ce type de commune :
-- Destinations autorisées (habitation, commerce, activité…) et interdites
-- Emprise au sol (CES) et hauteur maximale admise (en mètres et/ou niveaux)
-- Reculs obligatoires : voirie (marge de recul), limites séparatives
-- Conditions de division parcellaire (surface minimale des lots)
-- Changement de destination : possible / soumis à PC / interdit
+
+ 1 — OCCUPATION DU SOL
+
+| Usage | Statut | Article / Source |
+|---|---|---|
+
+Extraire pour chaque catégorie applicable : Habitation individuelle, Habitation collective, Logement social, Commerce et services, Bureaux et tertiaires, Hébergement hôtelier, Activités artisanales, Activités industrielles, Équipements publics, Constructions agricoles, Affouillements/dépôts.
+Statut : **Autorisé** / **Interdit** / **Conditionné** (préciser la condition)
+
+---
+
+ 2 — DESSERTE ET RÉSEAUX
+
+| Réseau | Règle extraite |
+|---|---|
+
+Extraire : Voirie et accès (largeur min, impasses), Eau potable, Assainissement eaux usées, Assainissement eaux pluviales, Réseaux divers (élec, télécom, VE)
+
+---
+
+ 3 — IMPLANTATION ET VOLUMÉTRIE
+
+| Paramètre | Règle extraite |
+|---|---|
+
+Extraire : Recul voies, Recul limites séparatives, Distance entre constructions, Emprise au sol (CES), Hauteur maximale (m + R+X), Surface de plancher maximale
+
+---
+
+ 4 — ASPECT EXTÉRIEUR
+
+| Élément | Règle extraite |
+|---|---|
+
+Extraire si présent : Façades, Toitures, Clôtures, Menuiseries, Éléments techniques (solaire, clim), Intégration paysagère / ABF
+
+---
+
+ 5 — STATIONNEMENT
+
+| Usage | Places exigées | Conditions |
+|---|---|---|
+
+Extraire : Logement individuel, Logement collectif, Bureaux/commerces, Hébergement, Activités. Inclure dimensions minimales et localisation.
+
+---
+
+ 6 — ESPACES VERTS ET PAYSAGE
+
+| Exigence | Règle extraite |
+|---|---|
+
+Extraire : Surface végétalisée minimale, Arbres existants, Plantations obligatoires, Espaces libres, Coefficient de biotope
+
+---
+
+ 7 — PERFORMANCE ÉNERGÉTIQUE ET ENVIRONNEMENT
+
+| Exigence | Règle extraite |
+|---|---|
+
+Extraire si présent : Normes énergétiques, Énergies renouvelables, Matériaux biosourcés, Gestion eaux pluviales, Perméabilité sols, Nuisances
+
+---
+
+ 8 — DIVISIONS PARCELLAIRES ET LOTISSEMENTS
+
+| Paramètre | Règle extraite |
+|---|---|
+
+Extraire : Surface minimale de lot, Largeur minimale de façade, Conditions de division, Règles lotissement, Détachements sans construction
+
+---
+
+ 9 — DISPOSITIONS GÉNÉRALES APPLICABLES
+
+| Disposition | Contenu |
+|---|---|
+
+Extraire : Définitions réglementaires, Adaptations mineures, SUP (servitudes), Protections patrimoniales (ABF, ZPPAUP), Risques naturels (PPRI, PPRN), OAP, Emplacements réservés
+
+---
 
 **2. STRATÉGIE MARCHAND DE BIENS**
-En fonction du règlement de cette zone, quelle(s) opération(s) sont les plus pertinentes :
-- Division + vente à la découpe : faisabilité et conditions
-- Rénovation / surélévation / extension : droits mobilisables
-- Changement de destination ou création de surface habitable : marge de manœuvre
-- Potentiel de densification : est-ce une zone favorable ou contraignante ?
 
-**3. POINTS DE VIGILANCE & RISQUES SPÉCIFIQUES**
-- Risques PLU propres à ce type de zone (inconstructibilité partielle, règles ABF probables, zones humides/inondables…)
-- Délais et procédures à anticiper (PC / DP / modification PLU)
-- 2 ou 3 questions à poser impérativement en mairie avant acquisition
+- **Division + vente à la découpe :** faisabilité, surface minimale, procédure (DP / PA)
+- **Rénovation / extension / surélévation :** droits mobilisables, marge disponible
+- **Changement de destination :** possible / procédure / interdit
+- **Densification :** zone favorable ou contraignante — pourquoi
 
-Conclus par une phrase de synthèse : opportunité ou prudence pour un MdB ?`;
+---
+
+**3. RISQUES & QUESTIONS MAIRIE**
+
+- **Risque n°1 :** (ABF, OAP, zone humide, inconstructibilité partielle…)
+- **Risque n°2 :** (servitude, PPRi, retrait-gonflement argiles…)
+- **Procédure à anticiper :** PC / DP / permis d'aménager — délai estimé
+- **Question 1 à poser en mairie :** formulation directe
+- **Question 2 à poser en mairie :** formulation directe
+- **Question 3 à poser en mairie :** formulation directe
+
+---
+
+**Synthèse :** opportunité à saisir / dossier à instruire avec précaution / zone à éviter — raison principale en une ligne.`;
+
+    // Extraction texte PDF si disponible
+    let zoneDocText = null;
+    if (urlfic) {
+      try {
+        zoneDocText = await getPluZoneText(urlfic, zone);
+      } catch (e) {
+        console.warn(`[interpret-zone] PDF non lisible: ${e.message}`);
+      }
+    }
+
+    // Injecter le texte extrait dans le prompt
+    const fullPrompt = zoneDocText
+      ? `${prompt}\n\n---\n\nEXTRAIT DU RÈGLEMENT PLU — ZONE ${zone} :\n\n${zoneDocText}`
+      : prompt;
 
     const msg = await client.messages.create({
       model: MODEL_QUALITY,
-      max_tokens: 1200,
+      max_tokens: 4096,
       system: SYSTEM_EXPERT,
-      messages: [{ role: "user", content: prompt }],
+      messages: [{ role: "user", content: fullPrompt }],
     });
 
-    const payload = { analysis: msg.content[0].text };
+    const payload = { analysis: msg.content[0].text, hasDocument: !!zoneDocText };
     cacheSet(cacheKey, payload, 6 * 3_600_000);
     res.json(payload);
   } catch (err) {
@@ -176,7 +303,9 @@ router.post("/refine-search", async (req, res) => {
         },
       ],
     });
-    res.json(JSON.parse(msg.content[0].text.trim().replace(/```json|```/g, "")));
+    res.json(
+      JSON.parse(msg.content[0].text.trim().replace(/```json|```/g, "")),
+    );
   } catch (err) {
     res.status(502).json({ error: err.message });
   }
@@ -186,10 +315,20 @@ router.post("/refine-search", async (req, res) => {
 router.post("/risques-mdb", async (req, res) => {
   try {
     const {
-      zone, typeZone, adresse, commune, departement,
-      operationType = "division", projetDescription,
-      surfaceTerrain, prixAchat, nbLots, periodeConstruction,
-      presenceABF = false, zoneInondable = false, locataireEnPlace = false,
+      zone,
+      typeZone,
+      adresse,
+      commune,
+      departement,
+      operationType = "division",
+      projetDescription,
+      surfaceTerrain,
+      prixAchat,
+      nbLots,
+      periodeConstruction,
+      presenceABF = false,
+      zoneInondable = false,
+      locataireEnPlace = false,
     } = req.body;
     if (!zone) return res.status(400).json({ error: "zone required" });
 
@@ -201,24 +340,28 @@ router.post("/risques-mdb", async (req, res) => {
     const ctx = [
       `Adresse: ${adresse || "?"} | Commune: ${commune || "?"} (dpt ${departement || "?"})`,
       `Zone PLU: ${zone} (${typeZone || "?"}) | Opération: ${operationType}`,
-      projetDescription  ? `Projet: ${projetDescription}` : "",
-      surfaceTerrain     ? `Surface: ${surfaceTerrain}m²` : "",
-      prixAchat          ? `Prix achat: ${Number(prixAchat).toLocaleString("fr-FR")}€` : "",
-      nbLots             ? `Nb lots: ${nbLots}` : "",
+      projetDescription ? `Projet: ${projetDescription}` : "",
+      surfaceTerrain ? `Surface: ${surfaceTerrain}m²` : "",
+      prixAchat
+        ? `Prix achat: ${Number(prixAchat).toLocaleString("fr-FR")}€`
+        : "",
+      nbLots ? `Nb lots: ${nbLots}` : "",
       periodeConstruction ? `Construction: ${periodeConstruction}` : "",
-      presenceABF        ? "⚠ Périmètre ABF" : "",
-      zoneInondable      ? "⚠ Zone inondable" : "",
-      locataireEnPlace   ? "⚠ Locataire en place" : "",
-    ].filter(Boolean).join("\n");
+      presenceABF ? "⚠ Périmètre ABF" : "",
+      zoneInondable ? "⚠ Zone inondable" : "",
+      locataireEnPlace ? "⚠ Locataire en place" : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const prompt = `Contexte MdB:
 ${ctx}
 
 Identifie les risques pour cette opération de marchand de biens.
 Inclus minimum: recours tiers, TVA sur marge, risque PLU, zone ${zone}.
-${presenceABF      ? "Inclus: risque ABF." : ""}
+${presenceABF ? "Inclus: risque ABF." : ""}
 ${locataireEnPlace ? "Inclus: risques locataire en place." : ""}
-${zoneInondable    ? "Inclus: risque PPRi/inondation." : ""}
+${zoneInondable ? "Inclus: risque PPRi/inondation." : ""}
 
 JSON only (sans markdown):
 {
@@ -256,14 +399,28 @@ router.post("/synthese-marche", async (req, res) => {
 
     const lines = [
       `Zone: ${zone} | Commune: ${commune || "?"}`,
-      medianBati ? `Prix médian bâti: ${medianBati}€/m² (${dvfStats.bati.count} tx)` : "",
-      dvfStats?.evolutionPct != null ? `Évolution 12m: ${dvfStats.evolutionPct > 0 ? "+" : ""}${dvfStats.evolutionPct}%` : "",
-      socioProfile?.commune?.population     ? `Population: ${socioProfile.commune.population.toLocaleString("fr-FR")} hab` : "",
-      socioProfile?.revenus?.medianDisponible ? `Revenu médian/UC: ${socioProfile.revenus.medianDisponible.toLocaleString("fr-FR")}€` : "",
-      socioProfile?.emploi?.tauxCadres      ? `Cadres: ${socioProfile.emploi.tauxCadres}%` : "",
-      socioProfile?.logement?.tauxProprietaires ? `Propriétaires: ${socioProfile.logement.tauxProprietaires}%` : "",
+      medianBati
+        ? `Prix médian bâti: ${medianBati}€/m² (${dvfStats.bati.count} tx)`
+        : "",
+      dvfStats?.evolutionPct != null
+        ? `Évolution 12m: ${dvfStats.evolutionPct > 0 ? "+" : ""}${dvfStats.evolutionPct}%`
+        : "",
+      socioProfile?.commune?.population
+        ? `Population: ${socioProfile.commune.population.toLocaleString("fr-FR")} hab`
+        : "",
+      socioProfile?.revenus?.medianDisponible
+        ? `Revenu médian/UC: ${socioProfile.revenus.medianDisponible.toLocaleString("fr-FR")}€`
+        : "",
+      socioProfile?.emploi?.tauxCadres
+        ? `Cadres: ${socioProfile.emploi.tauxCadres}%`
+        : "",
+      socioProfile?.logement?.tauxProprietaires
+        ? `Propriétaires: ${socioProfile.logement.tauxProprietaires}%`
+        : "",
       `Opération: ${operationType || "MdB division/valorisation"}`,
-    ].filter(Boolean).join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const msg = await client.messages.create({
       model: MODEL_FAST,
