@@ -25,7 +25,7 @@ export function useArtisans() {
       if (source === "both") {
         const [pappersRes, sireneRes] = await Promise.allSettled([
           searchArtisans({ trades, departement, codePostal, adresse, lat, lon, zonePlu, typeZone }),
-          searchAndScore({ trades, departement, region, codePostal }),
+          searchAndScore({ trades, departement, citycode, region, codePostal }),
         ]);
         const pappers = pappersRes.status === "fulfilled" ? pappersRes.value.results || [] : [];
         const sirene  = sireneRes.status  === "fulfilled" ? sireneRes.value  || [] : [];
@@ -37,7 +37,7 @@ export function useArtisans() {
         const data = await searchArtisans({ trades, departement, codePostal, adresse, lat, lon, zonePlu, typeZone });
         results = data.results || [];
       } else {
-        results = await searchAndScore({ trades, departement, region, codePostal, debug });
+        results = await searchAndScore({ trades, departement, citycode, region, codePostal, debug });
       }
 
       setState({ status: "done", results, count: results.length, source, error: null, debugData: null });

@@ -26,36 +26,60 @@ const TRADE_TO_RGE = {
   menuiserie:  "Fenêtres et portes",
 };
 
-const toNaf = (naf) => naf; // l'API attend le format avec point : '43.22A'
+const GEO_BASE = 'https://geo.api.gouv.fr/communes';
 
-// L'API accepte un seul activite_principale par requête — on parallélise et déduplique
-async function searchSirene({ nafCodes, departement, region, codePostal, perPage = 25, debug = false }) {
-  const responses = await Promise.all(
-    nafCodes.map(async naf => {
-      const p = new URLSearchParams({
-        activite_principale: toNaf(naf),
-        page: 1, per_page: perPage, etat_administratif: 'A',
-      });
-      if (departement) p.set('departement', departement);
-      if (region)      p.set('region', region);
-      if (codePostal)  p.set('code_postal', codePostal);
+// geo.api.gouv.fr — CORS open, retourne les codes postaux d'une commune
+async function postalCodesForCommune(citycode) {
+  const r = await fetch(`${GEO_BASE}/${citycode}?fields=codesPostaux`).catch(() => null);
+  if (!r?.ok) return [];
+  const d = await r.json().catch(() => null);
+  return d?.codesPostaux || [];
+}
+
+// geo.api.gouv.fr — communes limitrophes avec leurs codes postaux
+async function neighborPostalCodes(citycode) {
+  const r = await fetch(`${GEO_BASE}/${citycode}/communes-limitrophes?fields=codesPostaux,nom`).catch(() => null);
+  if (!r?.ok) return [];
+  const d = await r.json().catch(() => []);
+  return Array.isArray(d) ? d.flatMap(c => c.codesPostaux || []) : [];
+}
+
+// Recherche SIRENE — 1 NAF × N codes postaux en parallèle
+async function searchByPostalCodes(nafCodes, postalCodes, debug = false) {
+  const cps = [...new Set(postalCodes)].slice(0, 8);
+  const requests = nafCodes.flatMap(naf =>
+    cps.map(async cp => {
+      const p = new URLSearchParams({ activite_principale: naf, page: 1, per_page: 25, etat_administratif: 'A', code_postal: cp });
       const url = `${SIRENE_BASE}/search?${p}`;
       if (debug) console.log(`[SIRENE] GET ${url}`);
       const r = await fetch(url);
-      if (debug) console.log(`[SIRENE] ${naf} → HTTP ${r.status}`);
-      if (!r.ok) {
-        const body = await r.text().catch(() => '');
-        if (debug) console.error(`[SIRENE] ${naf} error body:`, body);
-        throw new Error(`SIRENE HTTP ${r.status} — ${body.slice(0, 200)}`);
-      }
+      if (!r.ok) { if (debug) console.warn(`[SIRENE] ${naf}/${cp} HTTP ${r.status}`); return []; }
       const d = await r.json();
-      if (debug) console.log(`[SIRENE] ${naf} → ${d.total_results} résultats totaux, ${(d.results||[]).length} retournés`);
+      if (debug) console.log(`[SIRENE] ${naf}/${cp} → ${d.results?.length ?? 0} résultats`);
       return (d.results || []).map(parseSirene);
     })
   );
+  return (await Promise.all(requests)).flat();
+}
+
+// Recherche SIRENE — 1 NAF × 1 département
+async function searchByDept(nafCodes, departement, debug = false) {
+  const requests = nafCodes.map(async naf => {
+    const p = new URLSearchParams({ activite_principale: naf, page: 1, per_page: 25, etat_administratif: 'A', departement });
+    const url = `${SIRENE_BASE}/search?${p}`;
+    if (debug) console.log(`[SIRENE] GET ${url}`);
+    const r = await fetch(url);
+    if (!r.ok) { if (debug) console.warn(`[SIRENE] ${naf}/dept=${departement} HTTP ${r.status}`); return []; }
+    const d = await r.json();
+    if (debug) console.log(`[SIRENE] ${naf}/dept=${departement} → ${d.results?.length ?? 0} résultats`);
+    return (d.results || []).map(parseSirene);
+  });
+  return (await Promise.all(requests)).flat();
+}
+
+function dedupe(arr) {
   const map = new Map();
-  responses.flat().forEach(c => { if (!map.has(c.siren)) map.set(c.siren, c); });
-  if (debug) console.log(`[SIRENE] total après dédup: ${map.size}`);
+  arr.forEach(c => { if (!map.has(c.siren)) map.set(c.siren, c); });
   return [...map.values()];
 }
 
@@ -139,22 +163,58 @@ function priority(s, hasContact) {
   return 'P4';
 }
 
-export async function searchAndScore({ trades, departement, region, codePostal, debug = false }) {
+export async function searchAndScore({ trades, departement, citycode, region, codePostal, debug = false }) {
   const nafCodes = [...new Set(trades.flatMap(t => NAF_BY_TRADE[t] || []))];
-  if (debug) console.log('[searchAndScore] trades:', trades, '→ nafCodes:', nafCodes, '| dept:', departement);
+  if (debug) console.log('[searchAndScore] trades:', trades, '→ nafCodes:', nafCodes, '| citycode:', citycode, '| dept:', departement);
   if (!nafCodes.length) throw new Error('Unknown trades');
 
-  const companies = await searchSirene({ nafCodes, departement, region, codePostal, debug });
-  if (debug) console.log('[searchAndScore] SIRENE companies:', companies.length);
+  let raw = [];
+  let scope = 'département';
 
+  // ── 1. Commune ──────────────────────────────────────────
+  if (citycode) {
+    const cps = await postalCodesForCommune(citycode);
+    if (debug) console.log('[GEO] commune', citycode, '→ CP:', cps);
+    if (cps.length) {
+      scope = `commune (${cps.join(', ')})`;
+      raw = await searchByPostalCodes(nafCodes, cps, debug);
+      if (debug) console.log(`[searchAndScore] commune → ${raw.length} résultats`);
+    }
+  }
+
+  // ── 2. Communes limitrophes ─────────────────────────────
+  if (raw.length < 5 && citycode) {
+    const neighborCps = await neighborPostalCodes(citycode);
+    if (debug) console.log('[GEO] limitrophes → CP:', neighborCps);
+    if (neighborCps.length) {
+      scope = 'communes limitrophes';
+      const extra = await searchByPostalCodes(nafCodes, neighborCps, debug);
+      raw = [...raw, ...extra];
+      if (debug) console.log(`[searchAndScore] limitrophes → ${raw.length} résultats cumulés`);
+    }
+  }
+
+  // ── 3. Département ─────────────────────────────────────
+  if (raw.length < 5 && departement) {
+    if (debug) console.log(`[searchAndScore] fallback département ${departement}`);
+    scope = `département ${departement}`;
+    const extra = await searchByDept(nafCodes, departement, debug);
+    raw = [...raw, ...extra];
+    if (debug) console.log(`[searchAndScore] département → ${raw.length} résultats cumulés`);
+  }
+
+  const companies = dedupe(raw);
+  if (debug) console.log(`[searchAndScore] après dédup: ${companies.length} (scope: ${scope})`);
+
+  // ── RGE ────────────────────────────────────────────────
   const rgeRes = await Promise.allSettled(
     trades.filter(t => TRADE_TO_RGE[t])
           .map(t => searchRGE({ departement, codePostal, domaine: TRADE_TO_RGE[t], debug }))
   );
   const rgeFlat = rgeRes.filter(r => r.status === 'fulfilled').flatMap(r => r.value);
   if (debug) {
-    rgeRes.forEach((r, i) => r.status === 'rejected' && console.warn('[RGE] rejected:', r.reason));
-    console.log('[searchAndScore] RGE flat:', rgeFlat.length);
+    rgeRes.forEach(r => r.status === 'rejected' && console.warn('[RGE] rejected:', r.reason));
+    console.log('[searchAndScore] RGE:', rgeFlat.length);
   }
 
   const rgeMap = Object.fromEntries(rgeFlat.filter(r => r.siren).map(r => [r.siren, r]));

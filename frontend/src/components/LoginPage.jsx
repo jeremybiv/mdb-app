@@ -46,7 +46,7 @@ export function LoginPage({ onAuth }) {
             <div>
               <p className="text-[10px] text-muted mb-1">Email</p>
               <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="admin@mdb.app" required autoFocus
+                placeholder="invite@mdb.app" required autoFocus
                 className="input text-sm" />
             </div>
             <div>

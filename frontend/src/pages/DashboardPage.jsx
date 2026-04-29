@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+
+const DEBUG_ENABLED = import.meta.env.VITE_DEBUG === 'true';
 import { AddressSearch }  from '../components/AddressSearch.jsx';
 import { ApiSteps }       from '../components/ApiSteps.jsx';
 import { ArtisansTable }  from '../components/ArtisansTable.jsx';
@@ -11,10 +13,11 @@ import { useArtisans }    from '../hooks/useArtisans.js';
 import { usePLU }         from '../hooks/usePLU.js';
 import { fetchTransactions, computeStats, normalizeType } from '../lib/dvf.js';
 const TABS = [
-  { key: 'synthese',  label: 'Synthèse'   },
-  { key: 'marche',    label: 'Marché DVF' },
-  { key: 'artisans',  label: 'Artisans'   },
-  { key: 'risques',   label: 'Risques MdB'},
+  { key: 'plu',      label: 'Analyse PLU' },
+  { key: 'risques',  label: 'Risques MdB' },
+  { key: 'marche',   label: 'Marché DVF'  },
+  { key: 'artisans', label: 'Artisans'    },
+  { key: 'synthese', label: 'Synthèse'    },
 ];
 
 // ── Mini composants Synthèse ──────────────────────────────
@@ -172,7 +175,7 @@ export function DashboardPage() {
   const [trades,          setTrades]         = useState([]);
   const [source,          setSource]         = useState('sirene');
   const [debugMode,       setDebugMode]      = useState(false);
-  const [activeTab,       setActiveTab]      = useState('synthese');
+  const [activeTab,       setActiveTab]      = useState('plu');
   const [darkMode,        setDarkMode]       = useState(
     () => document.documentElement.classList.contains('dark')
   );
@@ -205,7 +208,7 @@ export function DashboardPage() {
     plu.reset();
     artisans.reset();
     setDvfSummary(null);
-    setActiveTab('synthese');
+    setActiveTab('plu');
     plu.lookup(address);
   };
 
@@ -214,8 +217,9 @@ export function DashboardPage() {
     artisans.search({
       trades, source, debug: debugMode,
       departement: dept,
-      citycode: plu.geo?.citycode,
-      adresse: plu.geo?.label,
+      codePostal:  plu.geo?.postcode,
+      citycode:    plu.geo?.citycode,
+      adresse:     plu.geo?.label,
       lat: plu.geo?.lat, lon: plu.geo?.lon,
       zonePlu: plu.zone?.libelle, typeZone: plu.zone?.typezone,
     });
@@ -312,20 +316,28 @@ export function DashboardPage() {
               ))}
             </div>
 
+            {/* ── Analyse PLU ───────────────────── */}
+            {activeTab === 'plu' && (
+              <div className="fade-in max-w-2xl">
+                {plu.zone
+                  ? <ZoneCard zone={plu.zone} doc={plu.doc} geo={plu.geo} commune={communeNom}
+                      onAnalyzeStart={() => setActiveTab('plu')} />
+                  : <div className="card py-6 text-center">
+                      <p className="text-sm text-muted">Aucune zone PLU trouvée pour cette adresse.</p>
+                    </div>
+                }
+              </div>
+            )}
+
             {/* ── Synthèse ──────────────────────── */}
             {activeTab === 'synthese' && (
               <div className="space-y-2.5 fade-in">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-                  {/* Zone PLU */}
-                  {plu.zone && <ZoneCard zone={plu.zone} doc={plu.doc} geo={plu.geo} commune={communeNom} />}
-                  {/* DVF — masqué si pas de données */}
                   {(dvfLoading || dvfSummary?.bati) && <DvfMiniCard stats={dvfSummary} loading={dvfLoading} />}
-                </div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
-                  <ArtisansTopCard artisans={artisans.results}
-                    onSearch={() => setActiveTab('artisans')} />
                   <RisquesMiniCard onOpen={() => setActiveTab('risques')} />
                 </div>
+                <ArtisansTopCard artisans={artisans.results}
+                  onSearch={() => setActiveTab('artisans')} />
               </div>
             )}
 
@@ -351,10 +363,12 @@ export function DashboardPage() {
                       className="btn-primary flex-1 disabled:opacity-40">
                       {artisans.status === 'loading' ? 'Recherche…' : 'Trouver les artisans'}
                     </button>
-                    <button onClick={() => setDebugMode(d => !d)} title="Debug"
-                      className={`px-3 py-2 text-xs rounded-md border transition-colors ${debugMode ? 'border-amber/40 text-amber bg-amber/8' : 'border-border text-muted hover:text-dim'}`}>
-                      ⚙
-                    </button>
+                    {DEBUG_ENABLED && (
+                      <button onClick={() => setDebugMode(d => !d)} title="Debug"
+                        className={`px-3 py-2 text-xs rounded-md border transition-colors ${debugMode ? 'border-amber/40 text-amber bg-amber/8' : 'border-border text-muted hover:text-dim'}`}>
+                        ⚙
+                      </button>
+                    )}
                   </div>
                 </div>
                 <DebugPanel data={artisans.debugData} />
