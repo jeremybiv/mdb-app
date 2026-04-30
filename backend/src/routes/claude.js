@@ -124,10 +124,81 @@ router.post("/interpret-zone", async (req, res) => {
     const { zone, typeZone, destDomi, libelong, urlfic, projetDescription, commune } = req.body;
     if (!zone) return res.status(400).json({ error: "zone required" });
 
-    // Cache : clé inclut la présence du document pour ne pas mélanger analyses avec/sans PDF
-    const cacheKey = `claude_zone_v3_${zone}_${(commune || "").toLowerCase()}${urlfic ? "_doc" : ""}`;
+    // ── 1. Extraction PDF en premier (conditionne le prompt) ──
+    let zoneDocText = null;
+    let extractedRules = {};
+    if (urlfic) {
+      try {
+        const pluData = await getPluZoneText(urlfic, zone);
+        zoneDocText    = pluData.section;
+        extractedRules = pluData.rules ?? {};
+        const rulesCount = Object.values(extractedRules).filter(Boolean).length;
+        console.log(`[interpret-zone] Doc : ${zoneDocText?.length ?? 0} chars, ${rulesCount} règles extraites pour zone ${zone}`);
+      } catch (e) {
+        console.warn(`[interpret-zone] PDF non lisible: ${e.message}`);
+      }
+    }
+
+    // Cache : clé différente selon présence du document
+    const cacheKey = `claude_zone_v6_${zone}_${(commune || "").toLowerCase()}${zoneDocText ? "_doc" : ""}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json({ ...cached, fromCache: true });
+
+    // ── 2. Valeurs pré-extraites (déterministes) ─────────────
+    // Construire le bloc "VALEURS CERTIFIÉES" injecté en tête de prompt.
+    // L'ordre reflète les 9 blocs d'analyse pour faciliter la lecture par Claude.
+
+    const r = extractedRules; // alias court
+
+    const numLines = [
+      // Bloc 3
+      r.empriseSol          && `- Emprise au sol (CES) : **${r.empriseSol.value} %** — «${r.empriseSol.context}»`,
+      r.hauteurMax          && `- Hauteur max. (faîtage) : **${r.hauteurMax.value} m** — «${r.hauteurMax.context}»`,
+      r.hauteurEgout        && `- Hauteur à l'égout : **${r.hauteurEgout.value} m** — «${r.hauteurEgout.context}»`,
+      r.reculVoirie         && `- Recul voirie : **${r.reculVoirie.value} m** — «${r.reculVoirie.context}»`,
+      r.reculLimites        && `- Recul limites séparatives : **${r.reculLimites.value} m** — «${r.reculLimites.context}»`,
+      r.distanceConstruction && `- Distance entre constructions : **${r.distanceConstruction.value} m** — «${r.distanceConstruction.context}»`,
+      r.surfacePlancher     && `- Surface de plancher max. : **${r.surfacePlancher.value} m²** — «${r.surfacePlancher.context}»`,
+      // Bloc 5
+      r.statLogement        && `- Stationnement logement : **${r.statLogement.value} place(s)/logement** — «${r.statLogement.context}»`,
+      r.statBureau          && `- Stationnement bureau/commerce : **${r.statBureau.value} place(s)/m²** — «${r.statBureau.context}»`,
+      // Bloc 6
+      r.espaceVert          && `- Espaces verts min. : **${r.espaceVert.value} %** — «${r.espaceVert.context}»`,
+      r.coeffBiotope        && `- Coefficient de biotope (CBS) : **${r.coeffBiotope.value}** — «${r.coeffBiotope.context}»`,
+      // Bloc 8
+      r.surfaceMinLot       && `- Surface minimale de lot : **${r.surfaceMinLot.value} m²** — «${r.surfaceMinLot.context}»`,
+      r.largeurFacade       && `- Largeur minimale de façade : **${r.largeurFacade.value} m** — «${r.largeurFacade.context}»`,
+      // Bloc 9
+      r.presenceABF         && `- Périmètre ABF : OUI — «${r.presenceABF.context}»`,
+      r.presencePPRI        && `- Risque inondation (PPRi) : OUI — «${r.presencePPRI.context}»`,
+      r.presenceOAP         && `- OAP applicable : OUI — «${r.presenceOAP.context}»`,
+    ].filter(Boolean);
+
+    // Destinations (texte brut extrait — Bloc 1)
+    const destLines = [
+      r.destinationsAutorisees && `DESTINATIONS AUTORISÉES (texte extrait) :\n${r.destinationsAutorisees.text}`,
+      r.destinationsInterdites && `DESTINATIONS INTERDITES (texte extrait) :\n${r.destinationsInterdites.text}`,
+    ].filter(Boolean);
+
+    const certifiedBlock = (numLines.length > 0 || destLines.length > 0)
+      ? [
+          numLines.length > 0
+            ? `VALEURS NUMÉRIQUES CERTIFIÉES (regex — utilise EXACTEMENT ces chiffres) :\n${numLines.join('\n')}`
+            : null,
+          destLines.length > 0
+            ? destLines.join('\n\n')
+            : null,
+        ].filter(Boolean).join('\n\n') + '\n'
+      : '';
+
+    // ── 3. Instruction source : absolue si doc présent, typique sinon ──
+    const sourceInstruction = zoneDocText
+      ? `RÈGLE ABSOLUE — SOURCE UNIQUE :
+Le texte du règlement PLU est fourni à la fin de ce message.${certifiedBlock ? '\nLes valeurs ci-dessus sont extraites de ce texte — utilise-les telles quelles, sans reformuler.' : ''}
+Pour tout le reste, extraire UNIQUEMENT les informations présentes dans le texte.
+INTERDIT : inférer, supposer, appliquer des règles génériques.
+Cite chaque valeur entre «guillemets français». Absent → *Non mentionné au règlement*`
+      : `Aucun document disponible. Déduis les valeurs typiques pour ce type de zone et marque **(typique — à confirmer)**.`;
 
     const zoneCtx = [
       `Zone PLU : **${zone}**${libelong ? ` — ${libelong}` : ""}`,
@@ -135,141 +206,136 @@ router.post("/interpret-zone", async (req, res) => {
       destDomi ? `Destination dominante : ${destDomi}` : null,
       commune ? `Commune : ${commune}` : null,
       projetDescription ? `Projet envisagé : ${projetDescription}` : null,
-      `\n⚠️ Le texte du règlement PLU est fourni en fin de message. Extrais les valeurs EXACTES — ne déduis jamais une valeur typique si l'information figure dans le texte fourni. Si une donnée est absente du texte, marque **(typique — à confirmer)**.`,
+      certifiedBlock || null,
+      `\n${sourceInstruction}`,
     ]
       .filter(Boolean)
       .join("\n");
+
+    const citationNote = zoneDocText
+      ? `- Les valeurs numériques certifiées sont définitives — recopie-les telles quelles
+- Pour les autres champs : cite la phrase source entre «guillemets français»
+- Si absent du texte : *Non mentionné au règlement*`
+      : `- Données estimées : marque **(typique — à confirmer)**`;
 
     const prompt = `${zoneCtx}
 
 Tu es mandaté par un marchand de biens pour analyser cette zone avant acquisition. Produis une analyse opérationnelle structurée.
 
-FORMAT IMPÉRATIF — respecte exactement ces conventions de mise en forme :
-- Titres de blocs :  N — TITRE (jamais de ***)
-- Tableaux : format markdown | col | col | avec ligne séparatrice |---|---|
-- Listes : tirets simples -
-- Données non confirmées : marque **(typique — à confirmer)**
-- Données issues du règlement : marque **(source : doc)**
+FORMAT IMPÉRATIF :
+- Titres de blocs : #### BLOC N — TITRE
+- Tableaux : format markdown | col | col | avec ligne |---|---|
+${citationNote}
 
 **1. DROITS À CONSTRUIRE & RÈGLEMENT**
 
- 1 — OCCUPATION DU SOL
+#### BLOC 1 — OCCUPATION DU SOL
 
-| Usage | Statut | Article / Source |
+| Usage | Statut | Citation règlement |
 |---|---|---|
 
-Extraire pour chaque catégorie applicable : Habitation individuelle, Habitation collective, Logement social, Commerce et services, Bureaux et tertiaires, Hébergement hôtelier, Activités artisanales, Activités industrielles, Équipements publics, Constructions agricoles, Affouillements/dépôts.
-Statut : **Autorisé** / **Interdit** / **Conditionné** (préciser la condition)
+Extraire : Habitation individuelle, Habitation collective, Logement social, Commerce et services, Bureaux et tertiaires, Hébergement hôtelier, Activités artisanales, Activités industrielles, Équipements publics, Constructions agricoles, Affouillements/dépôts.
+Statut : **Autorisé** / **Interdit** / **Conditionné**
 
 ---
 
- 2 — DESSERTE ET RÉSEAUX
+#### BLOC 2 — DESSERTE ET RÉSEAUX
 
-| Réseau | Règle extraite |
-|---|---|
-
-Extraire : Voirie et accès (largeur min, impasses), Eau potable, Assainissement eaux usées, Assainissement eaux pluviales, Réseaux divers (élec, télécom, VE)
-
----
-
- 3 — IMPLANTATION ET VOLUMÉTRIE
-
-| Paramètre | Règle extraite |
-|---|---|
-
-Extraire : Recul voies, Recul limites séparatives, Distance entre constructions, Emprise au sol (CES), Hauteur maximale (m + R+X), Surface de plancher maximale
-
----
-
- 4 — ASPECT EXTÉRIEUR
-
-| Élément | Règle extraite |
-|---|---|
-
-Extraire si présent : Façades, Toitures, Clôtures, Menuiseries, Éléments techniques (solaire, clim), Intégration paysagère / ABF
-
----
-
- 5 — STATIONNEMENT
-
-| Usage | Places exigées | Conditions |
+| Réseau | Règle extraite | Citation |
 |---|---|---|
 
-Extraire : Logement individuel, Logement collectif, Bureaux/commerces, Hébergement, Activités. Inclure dimensions minimales et localisation.
+Extraire : Voirie et accès, Eau potable, Eaux usées, Eaux pluviales, Réseaux divers
 
 ---
 
- 6 — ESPACES VERTS ET PAYSAGE
+#### BLOC 3 — IMPLANTATION ET VOLUMÉTRIE
 
-| Exigence | Règle extraite |
-|---|---|
+| Paramètre | Valeur | Citation règlement |
+|---|---|---|
+
+Extraire : Recul voies, Recul limites séparatives, Distance entre constructions, Emprise au sol (CES %), Hauteur maximale (m + R+X), Surface de plancher maximale
+
+---
+
+#### BLOC 4 — ASPECT EXTÉRIEUR
+
+| Élément | Règle extraite | Citation |
+|---|---|---|
+
+Extraire si présent : Façades, Toitures, Clôtures, Menuiseries, Éléments techniques, Intégration paysagère
+
+---
+
+#### BLOC 5 — STATIONNEMENT
+
+| Usage | Places exigées | Citation |
+|---|---|---|
+
+Extraire : Logement individuel, Logement collectif, Bureaux/commerces, Hébergement, Activités, dimensions places
+
+---
+
+#### BLOC 6 — ESPACES VERTS ET PAYSAGE
+
+| Exigence | Règle extraite | Citation |
+|---|---|---|
 
 Extraire : Surface végétalisée minimale, Arbres existants, Plantations obligatoires, Espaces libres, Coefficient de biotope
 
 ---
 
- 7 — PERFORMANCE ÉNERGÉTIQUE ET ENVIRONNEMENT
+#### BLOC 7 — PERFORMANCE ÉNERGÉTIQUE ET ENVIRONNEMENT
 
-| Exigence | Règle extraite |
-|---|---|
+| Exigence | Règle extraite | Citation |
+|---|---|---|
 
-Extraire si présent : Normes énergétiques, Énergies renouvelables, Matériaux biosourcés, Gestion eaux pluviales, Perméabilité sols, Nuisances
-
----
-
- 8 — DIVISIONS PARCELLAIRES ET LOTISSEMENTS
-
-| Paramètre | Règle extraite |
-|---|---|
-
-Extraire : Surface minimale de lot, Largeur minimale de façade, Conditions de division, Règles lotissement, Détachements sans construction
+Extraire si présent : Normes énergétiques, Énergies renouvelables, Matériaux biosourcés, Gestion eaux pluviales, Perméabilité sols
 
 ---
 
- 9 — DISPOSITIONS GÉNÉRALES APPLICABLES
+#### BLOC 8 — DIVISIONS PARCELLAIRES ET LOTISSEMENTS
 
-| Disposition | Contenu |
-|---|---|
+| Paramètre | Règle extraite | Citation |
+|---|---|---|
 
-Extraire : Définitions réglementaires, Adaptations mineures, SUP (servitudes), Protections patrimoniales (ABF, ZPPAUP), Risques naturels (PPRI, PPRN), OAP, Emplacements réservés
+Extraire : Surface minimale de lot, Largeur minimale de façade, Conditions de division, Règles lotissement, Détachements
+
+---
+
+#### BLOC 9 — DISPOSITIONS GÉNÉRALES
+
+| Disposition | Contenu | Citation |
+|---|---|---|
+
+Extraire : SUP, Protections patrimoniales (ABF), Risques naturels (PPRI), OAP, Emplacements réservés
 
 ---
 
 **2. STRATÉGIE MARCHAND DE BIENS**
 
-- **Division + vente à la découpe :** faisabilité, surface minimale, procédure (DP / PA)
-- **Rénovation / extension / surélévation :** droits mobilisables, marge disponible
+- **Division + vente à la découpe :** faisabilité, surface minimale, procédure
+- **Rénovation / extension / surélévation :** droits mobilisables
 - **Changement de destination :** possible / procédure / interdit
-- **Densification :** zone favorable ou contraignante — pourquoi
+- **Densification :** favorable ou contraignant — pourquoi
 
 ---
 
 **3. RISQUES & QUESTIONS MAIRIE**
 
-- **Risque n°1 :** (ABF, OAP, zone humide, inconstructibilité partielle…)
-- **Risque n°2 :** (servitude, PPRi, retrait-gonflement argiles…)
-- **Procédure à anticiper :** PC / DP / permis d'aménager — délai estimé
-- **Question 1 à poser en mairie :** formulation directe
-- **Question 2 à poser en mairie :** formulation directe
-- **Question 3 à poser en mairie :** formulation directe
+- **Risque n°1 :**
+- **Risque n°2 :**
+- **Procédure à anticiper :** délai estimé
+- **Question 1 à poser en mairie :**
+- **Question 2 à poser en mairie :**
+- **Question 3 à poser en mairie :**
 
 ---
 
-**Synthèse :** opportunité à saisir / dossier à instruire avec précaution / zone à éviter — raison principale en une ligne.`;
+**Synthèse :** opportunité à saisir / dossier à instruire avec précaution / zone à éviter — raison principale.`;
 
-    // Extraction texte PDF si disponible
-    let zoneDocText = null;
-    if (urlfic) {
-      try {
-        zoneDocText = await getPluZoneText(urlfic, zone);
-      } catch (e) {
-        console.warn(`[interpret-zone] PDF non lisible: ${e.message}`);
-      }
-    }
-
-    // Injecter le texte extrait dans le prompt
+    // ── 3. Injection du texte extrait en fin de prompt ──────
     const fullPrompt = zoneDocText
-      ? `${prompt}\n\n---\n\nEXTRAIT DU RÈGLEMENT PLU — ZONE ${zone} :\n\n${zoneDocText}`
+      ? `${prompt}\n\n${'='.repeat(60)}\nTEXTE BRUT DU RÈGLEMENT PLU — ZONE ${zone}\nSource : ${urlfic}\n${'='.repeat(60)}\n\n${zoneDocText}`
       : prompt;
 
     const msg = await client.messages.create({
@@ -279,7 +345,27 @@ Extraire : Définitions réglementaires, Adaptations mineures, SUP (servitudes),
       messages: [{ role: "user", content: fullPrompt }],
     });
 
-    const payload = { analysis: msg.content[0].text, hasDocument: !!zoneDocText };
+    // Sérialise extractedRules pour le frontend : on garde value/context pour
+    // les numériques, text pour les paragraphes, present/context pour les boolean.
+    const rulesForClient = Object.fromEntries(
+      Object.entries(extractedRules).map(([k, v]) => {
+        if (!v) return [k, null];
+        if (v.text    != null) return [k, { text: v.text }];
+        if (v.present != null) return [k, { present: v.present, context: v.context }];
+        return [k, { value: v.value, context: v.context }];
+      })
+    );
+
+    const payload = {
+      analysis:       msg.content[0].text,
+      hasDocument:    !!zoneDocText,
+      docTextLength:  zoneDocText?.length ?? 0,
+      extractedRules: rulesForClient,
+      // Inclus en debug pour vérifier ce que Claude a réellement lu
+      ...(process.env.NODE_ENV !== 'production' && zoneDocText
+        ? { docTextPreview: zoneDocText.slice(0, 1000) }
+        : {}),
+    };
     cacheSet(cacheKey, payload, 6 * 3_600_000);
     res.json(payload);
   } catch (err) {

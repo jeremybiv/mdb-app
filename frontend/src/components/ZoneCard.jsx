@@ -115,7 +115,7 @@ function parseZoneMetrics(info) {
   return { ces: ces ? `${ces}%` : null, hauteur };
 }
 
-function DebugPanel({ zone, doc, geo, parcelle, analysis, logs }) {
+function DebugPanel({ zone, doc, geo, parcelle, analysis, logs, docTextPreview, docTextLength, extractedRules }) {
   return (
     <div className="space-y-3 text-[11px] font-mono">
       {/* GPU doc — clé pour diagnostiquer le lien PLU */}
@@ -159,6 +159,31 @@ function DebugPanel({ zone, doc, geo, parcelle, analysis, logs }) {
           </div>
         </div>
       )}
+      {/* Règles extraites déterministement */}
+      {extractedRules && (
+        <div>
+          <p className="text-muted mb-1 uppercase tracking-wide">Règles extraites (regex)</p>
+          <pre className="bg-ink rounded p-2 overflow-x-auto text-dim whitespace-pre-wrap text-[10px]">
+            {JSON.stringify(extractedRules, null, 2)}
+          </pre>
+        </div>
+      )}
+      {/* Texte extrait du PDF — clé pour valider que Claude lit le bon document */}
+      <div>
+        <p className="text-muted mb-1 uppercase tracking-wide">
+          Texte PDF extrait
+          {docTextLength > 0
+            ? <span className="text-green ml-2">✓ {docTextLength} chars</span>
+            : <span className="text-red ml-2">✗ non disponible — Claude travaille sans document</span>
+          }
+        </p>
+        {docTextPreview
+          ? <pre className="bg-ink rounded p-2 overflow-x-auto text-dim whitespace-pre-wrap text-[10px] max-h-48">
+              {docTextPreview}{docTextLength > 1000 ? `\n… (${docTextLength - 1000} chars supplémentaires)` : ''}
+            </pre>
+          : <p className="text-muted text-[10px]">Aperçu non disponible (prod) ou PDF non lisible</p>
+        }
+      </div>
       {analysis && (
         <div>
           <p className="text-muted mb-1 uppercase tracking-wide">Réponse brute Claude</p>
@@ -182,11 +207,14 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
     : info?.color === 'red'   ? 'pill-red'
     : 'pill-gray';
 
-  const [analysis,  setAnalysis]  = useState(null);
-  const [loadingAI, setLoadingAI] = useState(false);
-  const [parcelle,  setParcelle]  = useState(null);
-  const [debugMode, setDebugMode] = useState(false);
-  const [logs,      setLogs]      = useState([]);
+  const [analysis,       setAnalysis]       = useState(null);
+  const [loadingAI,      setLoadingAI]      = useState(false);
+  const [parcelle,       setParcelle]       = useState(null);
+  const [debugMode,      setDebugMode]      = useState(false);
+  const [logs,           setLogs]           = useState([]);
+  const [docTextPreview, setDocTextPreview] = useState(null);
+  const [docTextLength,  setDocTextLength]  = useState(0);
+  const [extractedRules, setExtractedRules] = useState(null);
 
   const addLog = (msg, type = 'info') => setLogs(l => [...l, { msg, type }]);
 
@@ -234,8 +262,15 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
         urlfic,
         commune,
       });
-      addLog(`Réponse Claude reçue — ${data.analysis?.length} caractères${data.fromCache ? ' (cache)' : ''}${data.hasDocument ? ' · analyse sur document PDF réel' : ' · valeurs typiques (pas de document)'}`);
+      const docOk = data.hasDocument && data.docTextLength > 0;
+      addLog(
+        `Réponse Claude reçue — ${data.analysis?.length} chars${data.fromCache ? ' (cache)' : ''} · ${docOk ? `document PDF lu (${data.docTextLength} chars)` : '⚠ SANS document — valeurs typiques'}`,
+        docOk ? 'info' : 'warn'
+      );
       setAnalysis(data.analysis);
+      setDocTextPreview(data.docTextPreview || null);
+      setDocTextLength(data.docTextLength || 0);
+      if (data.extractedRules) setExtractedRules(data.extractedRules);
     } catch (e) {
       addLog(`Erreur Claude: ${e.message}`, 'error');
       setAnalysis('Erreur lors de l\'analyse Claude.');
@@ -291,11 +326,67 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
         </div>
       )}
 
-      {/* Description + métriques : uniquement après analyse Claude */}
+      {/* Description zone (static) */}
       {analysis && info?.desc && (
         <p className="text-xs text-dim leading-relaxed">{info.desc}</p>
       )}
-      {analysis && (metrics.ces || metrics.hauteur) && (
+
+      {/* Chiffres clés extraits du règlement PDF — déterministes */}
+      {extractedRules && (() => {
+        const er = extractedRules;
+        const numItems = [
+          er.empriseSol          && { label: 'Emprise sol (CES)',  val: `${er.empriseSol.value} %`,       title: er.empriseSol.context },
+          er.hauteurMax          && { label: 'Hauteur max',         val: `${er.hauteurMax.value} m`,       title: er.hauteurMax.context },
+          er.hauteurEgout        && { label: 'Hauteur égout',       val: `${er.hauteurEgout.value} m`,     title: er.hauteurEgout.context },
+          er.reculVoirie         && { label: 'Recul voirie',        val: `${er.reculVoirie.value} m`,      title: er.reculVoirie.context },
+          er.reculLimites        && { label: 'Recul lim. sép.',    val: `${er.reculLimites.value} m`,     title: er.reculLimites.context },
+          er.distanceConstruction && { label: 'Dist. constructions',val: `${er.distanceConstruction.value} m`, title: er.distanceConstruction.context },
+          er.surfacePlancher     && { label: 'SP max',              val: `${er.surfacePlancher.value} m²`, title: er.surfacePlancher.context },
+          er.surfaceMinLot       && { label: 'Surface min lot',     val: `${er.surfaceMinLot.value} m²`,   title: er.surfaceMinLot.context },
+          er.largeurFacade       && { label: 'Largeur façade min',  val: `${er.largeurFacade.value} m`,    title: er.largeurFacade.context },
+          er.statLogement        && { label: 'Stat./logement',      val: `${er.statLogement.value} pl.`,   title: er.statLogement.context },
+          er.espaceVert          && { label: 'Espaces verts min',   val: `${er.espaceVert.value} %`,       title: er.espaceVert.context },
+          er.coeffBiotope        && { label: 'Coeff. biotope',      val: `${er.coeffBiotope.value}`,       title: er.coeffBiotope.context },
+        ].filter(Boolean);
+
+        const flags = [
+          er.presenceABF  && { label: 'ABF',  title: er.presenceABF.context },
+          er.presencePPRI && { label: 'PPRi', title: er.presencePPRI.context },
+          er.presenceOAP  && { label: 'OAP',  title: er.presenceOAP.context },
+        ].filter(Boolean);
+
+        if (numItems.length === 0 && flags.length === 0) return null;
+        return (
+          <>
+            <hr className="border-border" />
+            <div>
+              <p className="text-[10px] text-muted uppercase tracking-wide mb-1.5">Chiffres clés · extrait règlement</p>
+              {numItems.length > 0 && (
+                <div className="grid grid-cols-2 gap-1.5 mb-2">
+                  {numItems.map(({ label, val, title }) => (
+                    <div key={label} className="card-sm" title={title}>
+                      <p className="text-[10px] text-muted mb-0.5">{label}</p>
+                      <p className="text-sm font-semibold text-text">{val}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {flags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {flags.map(({ label, title }) => (
+                    <span key={label} className="pill pill-amber text-[10px]" title={title}>
+                      ⚠ {label}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        );
+      })()}
+
+      {/* Fallback métriques statiques si pas de PDF extrait */}
+      {!extractedRules && analysis && (metrics.ces || metrics.hauteur) && (
         <>
           <hr className="border-border" />
           <div className="grid grid-cols-2 gap-2">
@@ -359,7 +450,8 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
       {debugMode && (
         <div className="border border-amber/20 rounded-md p-3 bg-amber/5">
           <p className="text-[10px] font-medium text-amber uppercase tracking-wide mb-3">Mode debug</p>
-          <DebugPanel zone={zone} doc={doc} geo={geo} parcelle={parcelle} analysis={analysis} logs={logs} />
+          <DebugPanel zone={zone} doc={doc} geo={geo} parcelle={parcelle} analysis={analysis} logs={logs}
+            docTextPreview={docTextPreview} docTextLength={docTextLength} extractedRules={extractedRules} />
         </div>
       )}
 

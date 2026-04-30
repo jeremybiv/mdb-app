@@ -101,8 +101,41 @@ La **priorité** (P1–P4) est déduite du score et de la présence de contact d
 - Cache disque : `backend/cache/dvf/` — re-téléchargement uniquement si fichier absent
 - Lien parcelle : `explore.data.gouv.fr/fr/immobilier?code={id_parcelle}&level=parcelle`
 
-## Airtable flows
 
-- Chaque résultat Pappers → upsert dans table `Artisans` (par SIREN)
-- Chaque recherche → log dans table `Recherches`
-- `/api/cache/artisans` → lecture des artisans sauvegardés (historique)
+
+## Architecture finale — pipeline hybride déterministe + IA
+
+```
+
+PDF règlement PLU
+      ↓
+  fetchPdfText()          ← download + pdf-parse, cache 3j
+      ↓
+  extractZoneSection()    ← isolation section via regex (TOC-skipping)
+      ↓
+  extractRulesFromText()  ← 6 règles numériques par regex
+    empriseSol, hauteurMax, reculVoirie, reculLimites,
+    surfaceMinLot, stationnement → { value, context }
+      ↓
+  ┌──────────────────────────────────────────────────────┐
+  │ VALEURS CERTIFIÉES (injectées en tête de prompt)      │
+  │  - CES : 18 %  «emprise au sol ... est de 18 %»       │
+  │  - Hauteur : 9 m  «hauteur maximale ... est de 9 m»   │
+  │  ...                                                  │
+  └──────────────────────────────────────────────────────┘
+      ↓
+  Claude Sonnet           ← prompt = valeurs certifiées
+    + section brute       ← + texte règlement complet
+      ↓
+  9 blocs markdown        ← valeurs numériques certifiées +
+                             interprétation contextuelle
+```
+
+## Ce qui change côté résultat
+
+Bloc 3 (implantation) : CES/hauteur/reculs exacts, pas typiques
+Bloc 5 (stationnement) : nombre de places extrait directement
+Bloc 8 (divisions) : surface min lot extraite
+Frontend : panneau "Chiffres clés · extrait règlement" avec les 6 valeurs + tooltip source
+Fallback statique (zones.js) toujours là si PDF indisponible
+Redémarre le backend (vide le cache) puis reteste sur "7 chemin des rosiers, gex".
