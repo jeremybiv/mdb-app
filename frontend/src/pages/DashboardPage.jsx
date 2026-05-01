@@ -1,17 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { AddressSearch } from '../components/AddressSearch.jsx';
+import { ApiSteps } from '../components/ApiSteps.jsx';
+import { ArtisansTable } from '../components/ArtisansTable.jsx';
+import { DebugPanel } from '../components/DebugPanel.jsx';
+import { PrixMarche } from '../components/PrixMarche.jsx';
+import { RisquesMdb } from '../components/RisquesMdb.jsx';
+import { TradeSelector } from '../components/TradeSelector.jsx';
+import { ZoneCard } from '../components/ZoneCard.jsx';
+import { useArtisans } from '../hooks/useArtisans.js';
+import { usePLU } from '../hooks/usePLU.js';
+import { computeStats, fetchTransactions } from '../lib/dvf.js';
 
 const DEBUG_ENABLED = import.meta.env.VITE_DEBUG === 'true';
-import { AddressSearch }  from '../components/AddressSearch.jsx';
-import { ApiSteps }       from '../components/ApiSteps.jsx';
-import { ArtisansTable }  from '../components/ArtisansTable.jsx';
-import { DebugPanel }     from '../components/DebugPanel.jsx';
-import { PrixMarche }     from '../components/PrixMarche.jsx';
-import { RisquesMdb }     from '../components/RisquesMdb.jsx';
-import { TradeSelector }  from '../components/TradeSelector.jsx';
-import { ZoneCard }       from '../components/ZoneCard.jsx';
-import { useArtisans }    from '../hooks/useArtisans.js';
-import { usePLU }         from '../hooks/usePLU.js';
-import { fetchTransactions, computeStats, normalizeType } from '../lib/dvf.js';
 const TABS = [
   { key: 'plu',      label: 'Analyse PLU' },
   { key: 'risques',  label: 'Risques MdB' },

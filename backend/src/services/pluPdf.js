@@ -91,10 +91,10 @@ function extractZoneSection(text, zoneName) {
     ];
   }
 
-  // Extraire un paragraphe à partir d'un offset : jusqu'à 1 800 chars,
-  // tronqué au prochain marqueur de secteur/article pour rester compact.
-  function extractParagraph(offset) {
-    const slice = norm.slice(offset, offset + 1_800);
+  // Extraire un paragraphe à partir d'un offset.
+  // maxChars : 1 800 pour les paragraphes zone, 3 000 pour les articles thématiques.
+  function extractParagraph(offset, maxChars = 1_800) {
+    const slice = norm.slice(offset, offset + maxChars);
     const cutAt = slice.slice(40).search(
       /\n\s*(?:Secteurs?\s+[A-Z]|Sous-secteurs?\s+[A-Z]|Article\s+[A-Za-z\d]|ARTICLE\s+[A-Za-z\d]|Zone\s+[A-Z]|ZONE\s+[A-Z]|\d+\/\s+[A-Z])/i
     );
@@ -131,6 +131,42 @@ function extractZoneSection(text, zoneName) {
       }
 
       if (foundForThisName) break; // Premier pattern productif pour ce nom → passer au suivant
+    }
+  }
+
+  // ── Passe 2 : articles thématiques universels ──────────────────────────────
+  // Dans certains PLU, des articles (desserte, stationnement, etc.) s'appliquent
+  // à toutes les zones sans répéter le code de zone dans chaque paragraphe.
+  // La passe 1 ne les collecte pas → on les recherche par titre d'article.
+  const THEMATIC_RX_LIST = [
+    // Bloc 2 — voirie & accès
+    /\n[^\n]{0,60}(?:VOIRIE\s+ET\s+ACC[EÈ]S|DESSERTE\s+(?:PAR\s+LES?\s+)?VOIES?|ACC[EÈ]S\s+ET\s+VOIRIE|CONDITIONS?\s+(?:DE\s+)?DESSERTE)[^\n]{0,60}/gi,
+    // Bloc 2 — réseaux
+    /\n[^\n]{0,60}(?:DESSERTE\s+(?:PAR\s+LES?\s+)?R[EÉ]SEAUX?|ALIMENTATION\s+EN\s+EAU|ASSAINISSEMENT\s+(?:ET|DES?|COLLECTIF|NON))[^\n]{0,60}/gi,
+    // Bloc 4 — aspect extérieur
+    /\n[^\n]{0,60}(?:ASPECT\s+EXT[EÉ]RIEUR|ASPECT\s+DES\s+CONSTRUCTIONS?)[^\n]{0,60}/gi,
+    // Bloc 5 — stationnement
+    /\n[^\n]{0,60}(?:STATIONNEMENT|AIRES?\s+DE\s+STATIONNEMENT|R[EÈ]GLES?\s+DE\s+STATIONNEMENT)[^\n]{0,60}/gi,
+    // Bloc 7 — énergie / environnement
+    /\n[^\n]{0,60}(?:PERFORMANCE\s+[EÉ]NERG[EÉ]TIQUE|[EÉ]NERGIES?\s+RENOUVELABLES?|QUALIT[EÉ]\s+(?:ENVIRONNEMENTALE|[EÉ]NERG[EÉ]TIQUE))[^\n]{0,60}/gi,
+    // Bloc 8 — divisions parcellaires
+    /\n[^\n]{0,60}(?:DIVISIONS?\s+PARCELLAIRES?|TAILLE\s+DES?\s+(?:LOTS?|TERRAINS?)|SUPERFICIE\s+MINIMALE)[^\n]{0,60}/gi,
+  ];
+  // Si un paragraphe zone est déjà dans ce rayon, l'article thématique est déjà couvert
+  const THEMATIC_DEDUP_RADIUS = 2_000;
+
+  for (const rx of THEMATIC_RX_LIST) {
+    let m;
+    let addedForThisRx = 0;
+    while ((m = rx.exec(norm)) !== null && addedForThisRx < 3) {
+      const offset = m.index;
+      if ([...collected.keys()].some(k => Math.abs(k - offset) < THEMATIC_DEDUP_RADIUS)) continue;
+      if (!isNotToc(offset)) continue;
+      const para = extractParagraph(offset, 3_000);
+      if (para.length > 80) {
+        collected.set(offset, para);
+        addedForThisRx++;
+      }
     }
   }
 
@@ -231,6 +267,14 @@ const NUMERIC_PATTERNS = {
     /(\d+(?:[,.]\d+)?)\s*m(?:ètres?)?\s+entre\s+(?:deux\s+)?(?:constructions?|bâtiments?)/i,
   ],
 
+  // BLOC 2 — largeur minimale de voie d'accès / desserte
+  // "voie d'accès d'une largeur minimale de X m", "gabarit de X m"
+  largeurVoie: [
+    /(?:voie|accès|chemin\s+d['']accès|desserte)\b[^.\n]{0,80}?(?:largeur\s+(?:minimale?|minimum)|gabarit)\b[^.\n]{0,60}?(\d+(?:[,.]\d+)?)\s*m(?!\d)/i,
+    /(?:largeur|gabarit)\b[^.\n]{0,40}?(?:voie|voirie|accès|desserte)\b[^.\n]{0,60}?(\d+(?:[,.]\d+)?)\s*m(?!\d)/i,
+    /(\d+(?:[,.]\d+)?)\s*m(?:ètres?)?\s+(?:de\s+largeur|de\s+gabarit)[^.\n]{0,60}?(?:voie|accès|desserte)/i,
+  ],
+
   // BLOC 3 — surface de plancher maximale
   surfacePlancher: [
     /surface\s+(?:totale\s+)?de\s+plancher\b[^.\n]{0,100}?(?:maximale?|max)?\b[^.\n]{0,60}?(\d[\d\s]{0,7})\s*m²/i,
@@ -255,16 +299,33 @@ const NUMERIC_PATTERNS = {
 
   // BLOC 5 — stationnement : places par logement
   statLogement: [
-    /(\d+(?:[,.]\d+)?)\s+place[s]?\s+(?:de\s+stationnement\s+)?(?:minimum\b|au\s+minimum\b)?[^.\n]{0,60}?par\s+logement/i,
-    /par\s+logement\b[^.\n]{0,60}?(\d+(?:[,.]\d+)?)\s+place[s]?/i,
-    /il\s+est\s+(?:exigé|imposé|requis)\s+(\d+(?:[,.]\d+)?)\s+place[s]?[^.\n]{0,60}?logement/i,
-    /logement[^.\n]{0,60}?:\s*(\d+(?:[,.]\d+)?)\s+place[s]?/i,
+    // "X places [de stationnement] [au minimum] par logement"
+    /(\d+(?:[,.]\d+)?)\s+place[s]?\s+(?:de\s+stationnement\s+)?(?:au\s+minimum\s+|minimum\s+)?par\s+(?:logement|unité\s+de\s+logement)/i,
+    // "par logement ... X places"
+    /par\s+logement\b[^.\n]{0,80}?(\d+(?:[,.]\d+)?)\s+place[s]?/i,
+    // "il est exigé / imposé / requis X places ... logement"
+    /(?:il\s+est\s+)?(?:exigé|imposé|requis|demandé)\s+(?:au\s+minimum\s+)?(\d+(?:[,.]\d+)?)\s+place[s]?[^.\n]{0,80}?logement/i,
+    // "logements : X places" ou "habitation : X places"
+    /(?:logements?|habitations?)\s*[:-]\s*(\d+(?:[,.]\d+)?)\s+place[s]?/i,
+    // "pour tout / chaque logement [,:]  X places"
+    /pour\s+(?:tout\s+|chaque\s+)?logement[^.\n]{0,60}?[,:]?\s*(\d+(?:[,.]\d+)?)\s+place[s]?/i,
+    // "habitation individuelle / collective : X places"
+    /(?:habitation|logement)\s+(?:individuelle?|collective?|locatif)\b[^.\n]{0,60}?:\s*(\d+(?:[,.]\d+)?)\s+place[s]?/i,
   ],
 
   // BLOC 5 — stationnement : ratio bureaux/commerces (places/m²)
   statBureau: [
-    /(\d+(?:[,.]\d+)?)\s+place[s]?[^.\n]{0,60}?(?:tranche\s+de\s+)?(\d+)\s*m²[^.\n]{0,60}?(?:surface|bureau|commerce|activité)/i,
-    /(?:bureau|commerce|surface\s+de\s+vente)\b[^.\n]{0,60}?(\d+(?:[,.]\d+)?)\s+place[s]?\s+(?:par|pour)/i,
+    // "X place(s) pour Y m² de bureau/commerce" — ne capture que le nb de places
+    /(\d+(?:[,.]\d+)?)\s+place[s]?[^.\n]{0,60}?pour\s+\d+\s*m²[^.\n]{0,60}?(?:bureau|commerce|activité|surface)/i,
+    /(\d+(?:[,.]\d+)?)\s+place[s]?[^.\n]{0,60}?par\s+tranche\s+de\s+\d+\s*m²/i,
+    /(?:bureau|commerce|activité|surface\s+de\s+(?:vente|plancher))\b[^.\n]{0,80}?(\d+(?:[,.]\d+)?)\s+place[s]?\s+(?:par|pour)/i,
+  ],
+
+  // BLOC 5 — stationnement vélos / deux-roues
+  statVelo: [
+    /(\d+(?:[,.]\d+)?)\s+(?:places?\s+)?(?:de\s+stationnement\s+)?(?:pour\s+(?:les\s+)?)?(?:vélos?|cycles?|deux-roues?\s+non\s+motorisés?)\b/i,
+    /(?:vélos?|cycles?|deux-roues?)\b[^.\n]{0,60}?(\d+(?:[,.]\d+)?)\s+(?:places?|emplacements?)/i,
+    /abri[s]?\s+(?:à\s+)?vélos?\b[^.\n]{0,60}?(\d+(?:[,.]\d+)?)\s+(?:places?|emplacements?)/i,
   ],
 
   // BLOC 6 — espaces verts / surfaces végétalisées (%)
@@ -299,6 +360,8 @@ const PRESENCE_PATTERNS = {
   presenceABF:  /(?:périmètre|abords?)\s+(?:d[eu]s?\s+)?(?:monuments?\s+historiques?|ABF)\b|architecte\s+des\s+bâtiments\s+de\s+France/i,
   presencePPRI: /plan\s+de\s+prévention\s+des\s+risques?[^.\n]{0,60}?(?:naturels?|(?:d[e']\s*)?inondation)|PPRi?\b|zone\s+(?:d[e']\s*)?inondable/i,
   presenceOAP:  /orientation[s]?\s+d[''e]\s*aménagement\s+et\s+de\s+programmation|OAP\b/i,
+  // Bloc 7 — performance énergétique (RE2020, BBC, etc.)
+  presenceRE2020: /\bRE\s*2020\b|\br[eé]glementation\s+(?:thermique\b|[eé]nerg[eé]tique\b)|bâtiment\s+(?:basse\s+consommation\b|BBC\b)|label\s+BBC\b|\bRT\s*201[25]\b/i,
 };
 
 export function extractRulesFromText(text) {
@@ -358,8 +421,8 @@ export function extractRulesFromText(text) {
 }
 
 export async function getPluZoneText(urlfic, zoneName) {
-  // v4 : extraction multi-paragraphes (zone + parent zone)
-  const cacheKey = `plu_section_v4_${zoneName}_${Buffer.from(urlfic).toString('base64').slice(-24)}`;
+  // v5 : passe thématique (desserte, stationnement, etc.) + nouveaux patterns
+  const cacheKey = `plu_section_v5_${zoneName}_${Buffer.from(urlfic).toString('base64').slice(-24)}`;
   const hit = cacheGet(cacheKey);
   if (hit) {
     console.log(`[PLU-PDF] Cache hit section "${zoneName}" (${hit.section?.length ?? 0} chars, ${Object.values(hit.rules).filter(Boolean).length} règles)`);

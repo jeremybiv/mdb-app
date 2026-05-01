@@ -47,7 +47,7 @@ function parseJsonSafe(text) {
 }
 
 // Modèles : Sonnet pour analyses complexes, Haiku pour tâches simples
-const MODEL_QUALITY = "claude-sonnet-4-20250514";
+const MODEL_QUALITY = "claude-sonnet-4-5";
 const MODEL_FAST = "claude-haiku-4-5-20251001";
 
 // ── System prompt expert (Sonnet) ─────────────────────────
@@ -140,7 +140,7 @@ router.post("/interpret-zone", async (req, res) => {
     }
 
     // Cache : clé différente selon présence du document
-    const cacheKey = `claude_zone_v6_${zone}_${(commune || "").toLowerCase()}${zoneDocText ? "_doc" : ""}`;
+    const cacheKey = `claude_zone_v7_${zone}_${(commune || "").toLowerCase()}${zoneDocText ? "_doc" : ""}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json({ ...cached, fromCache: true });
 
@@ -151,6 +151,8 @@ router.post("/interpret-zone", async (req, res) => {
     const r = extractedRules; // alias court
 
     const numLines = [
+      // Bloc 2
+      r.largeurVoie         && `- Largeur voie d'accès min. : **${r.largeurVoie.value} m** — «${r.largeurVoie.context}»`,
       // Bloc 3
       r.empriseSol          && `- Emprise au sol (CES) : **${r.empriseSol.value} %** — «${r.empriseSol.context}»`,
       r.hauteurMax          && `- Hauteur max. (faîtage) : **${r.hauteurMax.value} m** — «${r.hauteurMax.context}»`,
@@ -161,7 +163,8 @@ router.post("/interpret-zone", async (req, res) => {
       r.surfacePlancher     && `- Surface de plancher max. : **${r.surfacePlancher.value} m²** — «${r.surfacePlancher.context}»`,
       // Bloc 5
       r.statLogement        && `- Stationnement logement : **${r.statLogement.value} place(s)/logement** — «${r.statLogement.context}»`,
-      r.statBureau          && `- Stationnement bureau/commerce : **${r.statBureau.value} place(s)/m²** — «${r.statBureau.context}»`,
+      r.statBureau          && `- Stationnement bureau/commerce : **${r.statBureau.value} place(s)** — «${r.statBureau.context}»`,
+      r.statVelo            && `- Stationnement vélos : **${r.statVelo.value} place(s)** — «${r.statVelo.context}»`,
       // Bloc 6
       r.espaceVert          && `- Espaces verts min. : **${r.espaceVert.value} %** — «${r.espaceVert.context}»`,
       r.coeffBiotope        && `- Coefficient de biotope (CBS) : **${r.coeffBiotope.value}** — «${r.coeffBiotope.context}»`,
@@ -172,6 +175,7 @@ router.post("/interpret-zone", async (req, res) => {
       r.presenceABF         && `- Périmètre ABF : OUI — «${r.presenceABF.context}»`,
       r.presencePPRI        && `- Risque inondation (PPRi) : OUI — «${r.presencePPRI.context}»`,
       r.presenceOAP         && `- OAP applicable : OUI — «${r.presenceOAP.context}»`,
+      r.presenceRE2020      && `- Norme énergétique (RE2020/BBC) : OUI — «${r.presenceRE2020.context}»`,
     ].filter(Boolean);
 
     // Destinations (texte brut extrait — Bloc 1)
