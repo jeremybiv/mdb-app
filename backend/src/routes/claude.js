@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Router } from "express";
 import { cacheGet, cacheSet } from "../lib/memcache.js";
+import { getKnownPdfUrl } from "../lib/pluData.js";
 import { NAF_BY_TRADE } from "../services/pappers.js";
 import { getPluZoneText } from "../services/pluPdf.js";
 
@@ -121,26 +122,45 @@ const SYSTEM_HAIKU =
 // ── interpret-zone ────────────────────────────────────────
 router.post("/interpret-zone", async (req, res) => {
   try {
-    const { zone, typeZone, destDomi, libelong, urlfic, projetDescription, commune } = req.body;
+    const { zone, typeZone, destDomi, libelong, urlfic, projetDescription, commune, citycode } = req.body;
     if (!zone) return res.status(400).json({ error: "zone required" });
 
-    // ── 1. Extraction PDF en premier (conditionne le prompt) ──
-    let zoneDocText = null;
-    let extractedRules = {};
-    if (urlfic) {
+    // ── 1. Résolution de l'URL PDF ─────────────────────────
+    // Priorité : référentiel local plu_data.json (URL fiable, maintenu manuellement)
+    //            → sinon urlfic fourni par l'IGN GPU (moins stable)
+    let resolvedUrlfic = urlfic || null;
+    let pdfSource = 'ign';
+
+    if (citycode) {
       try {
-        const pluData = await getPluZoneText(urlfic, zone);
-        zoneDocText    = pluData.section;
-        extractedRules = pluData.rules ?? {};
-        const rulesCount = Object.values(extractedRules).filter(Boolean).length;
-        console.log(`[interpret-zone] Doc : ${zoneDocText?.length ?? 0} chars, ${rulesCount} règles extraites pour zone ${zone}`);
+        const known = await getKnownPdfUrl(citycode);
+        if (known) {
+          resolvedUrlfic = known.url;
+          pdfSource = 'referentiel';
+          console.log(`[interpret-zone] PDF référentiel local — ${known.ville} (${citycode}): ${known.url.slice(-70)}`);
+        }
       } catch (e) {
-        console.warn(`[interpret-zone] PDF non lisible: ${e.message}`);
+        console.warn(`[interpret-zone] Lookup pluData échoué: ${e.message}`);
       }
     }
 
-    // Cache : clé différente selon présence du document
-    const cacheKey = `claude_zone_v7_${zone}_${(commune || "").toLowerCase()}${zoneDocText ? "_doc" : ""}`;
+    // ── 2. Extraction PDF (conditionne le prompt) ──────────
+    let zoneDocText = null;
+    let extractedRules = {};
+    if (resolvedUrlfic) {
+      try {
+        const pluData = await getPluZoneText(resolvedUrlfic, zone);
+        zoneDocText    = pluData.section;
+        extractedRules = pluData.rules ?? {};
+        const rulesCount = Object.values(extractedRules).filter(Boolean).length;
+        console.log(`[interpret-zone] Doc (${pdfSource}) : ${zoneDocText?.length ?? 0} chars, ${rulesCount} règles extraites pour zone ${zone}`);
+      } catch (e) {
+        console.warn(`[interpret-zone] PDF non lisible (${pdfSource}): ${e.message}`);
+      }
+    }
+
+    // Cache : clé différente selon présence du document et source (référentiel vs IGN)
+    const cacheKey = `claude_zone_v7_${zone}_${(commune || "").toLowerCase()}${zoneDocText ? `_doc_${pdfSource}` : ""}`;
     const cached = cacheGet(cacheKey);
     if (cached) return res.json({ ...cached, fromCache: true });
 
@@ -339,7 +359,7 @@ Extraire : SUP, Protections patrimoniales (ABF), Risques naturels (PPRI), OAP, E
 
     // ── 3. Injection du texte extrait en fin de prompt ──────
     const fullPrompt = zoneDocText
-      ? `${prompt}\n\n${'='.repeat(60)}\nTEXTE BRUT DU RÈGLEMENT PLU — ZONE ${zone}\nSource : ${urlfic}\n${'='.repeat(60)}\n\n${zoneDocText}`
+      ? `${prompt}\n\n${'='.repeat(60)}\nTEXTE BRUT DU RÈGLEMENT PLU — ZONE ${zone}\nSource : ${resolvedUrlfic}\n${'='.repeat(60)}\n\n${zoneDocText}`
       : prompt;
 
     const msg = await client.messages.create({
