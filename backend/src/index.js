@@ -11,6 +11,7 @@ import claudeRouter  from './routes/claude.js';
 import cacheRouter   from './routes/cache.js';
 import dvfRouter     from './routes/dvf.js';
 import sireneRouter  from './routes/sirene.js';
+import emailRouter   from './routes/email.js';
 
 // Charge .env.local à la racine du monorepo (priorité), puis .env
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,7 @@ app.use('/api/claude',  claudeRouter);
 app.use('/api/cache',   cacheRouter);
 app.use('/api/dvf',     dvfRouter);
 app.use('/api/sirene',  sireneRouter);
+app.use('/api/email',   emailRouter);
 
 app.get('/health', (_, res) => res.json({ ok: true, ts: new Date().toISOString() }));
 

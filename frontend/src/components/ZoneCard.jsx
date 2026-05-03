@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { interpretZone } from '../lib/api.js';
 import { matchZone } from '../lib/zones.js';
 import { getParcelle } from '../lib/ign.js';
+import { SendEmailModal } from './SendEmailModal.jsx';
 
 const DEBUG_ENABLED = import.meta.env.VITE_DEBUG === 'true';
 
@@ -211,10 +212,12 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
   const [loadingAI,      setLoadingAI]      = useState(false);
   const [parcelle,       setParcelle]       = useState(null);
   const [debugMode,      setDebugMode]      = useState(false);
+  const [showEmail,      setShowEmail]      = useState(false);
   const [logs,           setLogs]           = useState([]);
   const [docTextPreview, setDocTextPreview] = useState(null);
   const [docTextLength,  setDocTextLength]  = useState(0);
   const [extractedRules, setExtractedRules] = useState(null);
+  const [hasDocument,    setHasDocument]    = useState(false);
 
   const addLog = (msg, type = 'info') => setLogs(l => [...l, { msg, type }]);
 
@@ -271,6 +274,7 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
       setAnalysis(data.analysis);
       setDocTextPreview(data.docTextPreview || null);
       setDocTextLength(data.docTextLength || 0);
+      setHasDocument(!!data.hasDocument);
       if (data.extractedRules) setExtractedRules(data.extractedRules);
     } catch (e) {
       addLog(`Erreur Claude: ${e.message}`, 'error');
@@ -441,10 +445,31 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
             : 'Analyser avec Claude (PLU officiel) →'}
         </button>
       ) : (
-        <div className="bg-blue/5 border border-blue/15 rounded-md p-3.5 space-y-3">
-          <p className="section-label mb-2">Analyse réglementaire · Claude</p>
-          <MdLite text={analysis} />
-        </div>
+        <>
+          <div className="bg-blue/5 border border-blue/15 rounded-md p-3.5 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="section-label">Analyse réglementaire · Claude</p>
+              <button
+                onClick={() => setShowEmail(true)}
+                className="flex items-center gap-1.5 text-[11px] text-blue hover:underline shrink-0"
+                title="Envoyer par email"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+                </svg>
+                Envoyer
+              </button>
+            </div>
+            <MdLite text={analysis} />
+          </div>
+
+          <SendEmailModal
+            isOpen={showEmail}
+            onClose={() => setShowEmail(false)}
+            context={{ adresse: geo?.label, zone: libelle, commune, typeZone: zone.typezone }}
+            plu={{ analysis, extractedRules, hasDocument }}
+          />
+        </>
       )}
 
       {/* Debug panel */}

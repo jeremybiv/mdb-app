@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { getRisquesMdb } from '../lib/api.js';
+import { SendEmailModal } from './SendEmailModal.jsx';
 
 const NIVEAU = {
   critique: { pill: 'pill-red',   icon: '▲', iconBg: 'bg-red/10 text-red'    },
@@ -12,7 +13,7 @@ const CAT_ICONS = {
   juridique: '⚖', fiscal: '€', administratif: '🏛', technique: '⚙', marché: '↗',
 };
 
-export function RisquesMdb({ zone, typeZone, adresse, commune, departement }) {
+export function RisquesMdb({ zone, typeZone, adresse, commune, departement, geo }) {
   const [form, setForm] = useState({
     operationType:      'division',
     projetDescription:  '',
@@ -24,7 +25,8 @@ export function RisquesMdb({ zone, typeZone, adresse, commune, departement }) {
     zoneInondable:      false,
     locataireEnPlace:   false,
   });
-  const [state, setState] = useState({ status: 'idle', data: null, error: null });
+  const [state,     setState]     = useState({ status: 'idle', data: null, error: null });
+  const [showEmail, setShowEmail] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   const handleAnalyse = async () => {
@@ -47,10 +49,23 @@ export function RisquesMdb({ zone, typeZone, adresse, commune, departement }) {
     <div className="card fade-in space-y-4">
       <div className="flex items-center justify-between">
         <p className="section-label">Risques MdB</p>
-        {state.status === 'done' && (
-          <button onClick={() => setState({ status: 'idle', data: null, error: null })}
-            className="text-xs text-muted hover:text-dim transition-colors">← Modifier</button>
-        )}
+        <div className="flex items-center gap-3">
+          {state.status === 'done' && (
+            <button
+              onClick={() => setShowEmail(true)}
+              className="flex items-center gap-1.5 text-[11px] text-blue hover:underline"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+              </svg>
+              Envoyer
+            </button>
+          )}
+          {state.status === 'done' && (
+            <button onClick={() => setState({ status: 'idle', data: null, error: null })}
+              className="text-xs text-muted hover:text-dim transition-colors">← Modifier</button>
+          )}
+        </div>
       </div>
 
       {/* Form */}
@@ -188,6 +203,13 @@ export function RisquesMdb({ zone, typeZone, adresse, commune, departement }) {
           </div>
         );
       })()}
+
+      <SendEmailModal
+        isOpen={showEmail}
+        onClose={() => setShowEmail(false)}
+        context={{ adresse, zone, commune, typeZone }}
+        risques={state.data ? { ...state.data, operationType: form.operationType } : null}
+      />
     </div>
   );
 }

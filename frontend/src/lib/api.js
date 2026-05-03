@@ -60,3 +60,6 @@ export const getSyntheseMarche  = (body) => post('/api/claude/synthese-marche', 
 // ── Cache KV (read via backend) ───────────────────────────
 export const getSavedArtisans  = (params) => get('/api/cache/artisans', params);
 export const getRecentSearches = (params) => get('/api/cache/recherches', params);
+
+// ── Email ─────────────────────────────────────────────────
+export const sendReport = (body) => post('/api/email/send-report', body);
