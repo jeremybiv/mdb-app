@@ -261,6 +261,7 @@ export function ZoneCard({ zone, doc, geo, commune, onAnalyzeStart }) {
         destDomi: zone.destdomi,
         urlfic,
         commune,
+        citycode: geo?.citycode,
       });
       const docOk = data.hasDocument && data.docTextLength > 0;
       addLog(

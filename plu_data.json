@@ -1,0 +1,122 @@
+[
+  {
+    "ville": "Paris",
+    "territoire": "Commune de Paris",
+    "insee": "75056",
+    "type": "PLU bioclimatique",
+    "url_reglement_pdf": "https://data.geopf.fr/annexes/gpu/documents/DU_75056/4a02192762e3f46a75fe0f69f31c2bf2/75056_reglement_20241120.pdf",
+    "communes": [
+      { "nom": "Paris", "insee": "75056" }
+    ]
+  },
+  {
+    "ville": "Lyon",
+    "territoire": "Métropole de Lyon (PLU-H, document métropolitain)",
+    "insee": "69123",
+    "type": "PLU-H",
+    "url_reglement_pdf": "https://data.geopf.fr/annexes/gpu/documents/DU_200046977/664696ec518ff09c86d5eeae41def6f9/200046977_reglement_20241219.pdf",
+    "communes": [
+      { "nom": "Lyon", "insee": "69123" }
+    ]
+  },
+  {
+    "ville": "Marseille",
+    "territoire": "Métropole Aix-Marseille-Provence (PLUi métropolitain)",
+    "insee": "13055",
+    "type": "PLUi",
+    "url_reglement_pdf": "https://plui.ampmetropole.fr/assets/documents/PLUi_CT1_L_Reglement.pdf",
+    "communes": [
+      { "nom": "Marseille", "insee": "13055" }
+    ]
+  },
+  {
+    "ville": "Toulouse",
+    "territoire": "Toulouse Métropole (PLUi-H)",
+    "insee": "31555",
+    "type": "PLUi-H",
+    "url_reglement_pdf": "https://metropole.toulouse.fr/sites/toulouse-fr/files/2024-06/plui-h_3a_reg_ecrit.pdf",
+    "communes": [
+      { "nom": "Toulouse", "insee": "31555" }
+    ]
+  },
+  {
+    "ville": "Nice",
+    "territoire": "Métropole Nice Côte d’Azur (PLU métropolitain)",
+    "insee": "06088",
+    "type": "PLUm",
+    "url_reglement_pdf": "https://www.nicecotedazur.org/uploads/files/plu-metropolitain/1-pieces-reglementaires/4-reglement/dg/dg_r-ms2.pdf",
+    "communes": [
+      { "nom": "Nice", "insee": "06088" }
+    ]
+  },
+  {
+    "ville": "Nantes",
+    "territoire": "Nantes Métropole (PLUm métropolitain)",
+    "insee": "44109",
+    "type": "PLUm",
+    "url_reglement_pdf": "https://data.geopf.fr/annexes/gpu/documents/DU_244400404/a98d03f398c3511fa6ff65c015815929/244400404_reglement_20250207.pdf",
+    "communes": [
+      { "nom": "Nantes", "insee": "44109" }
+    ]
+  },
+  {
+    "ville": "Rennes",
+    "territoire": "Rennes Métropole (PLUi)",
+    "insee": "35238",
+    "type": "PLUi",
+    "url_reglement_pdf": "https://www.saint-gregoire.fr/wp-content/uploads/2020/01/243500139_PLUi_reglement_20191219.pdf",
+    "communes": [
+      { "nom": "Rennes", "insee": "35238" }
+    ]
+  },
+  {
+    "ville": "Strasbourg",
+    "territoire": "Eurométropole de Strasbourg (PLU intercommunal)",
+    "insee": "67482",
+    "type": "PLU",
+    "url_reglement_pdf": "https://sig.strasbourg.eu/datastrasbourg/plu_media/reglement_actuel.pdf",
+    "communes": [
+      { "nom": "Strasbourg", "insee": "67482" }
+    ]
+  },
+  {
+    "ville": "Bordeaux",
+    "territoire": "Commune de Bordeaux (PLU communal, dans le cadre du PLU métropolitain)",
+    "insee": "33063",
+    "type": "PLU",
+    "url_reglement_pdf": "https://data.geopf.fr/annexes/gpu/documents/DU_33071/51732bf987f003ab7f45328a379206f9/33071_reglement_20181213.pdf",
+    "communes": [
+      { "nom": "Bordeaux", "insee": "33063" }
+    ]
+  },
+  {
+    "ville": "Lille",
+    "territoire": "Métropole Européenne de Lille (PLU2)",
+    "insee": "59350",
+    "type": "PLU2",
+    "url_reglement_pdf": "https://documents-plu2.lillemetropole.fr/PLU2_en_vigueur/4_REGLEMENT/R%C3%A8glement%20%C3%A9crit/Livre%20IV.%20Zones%20sp%C3%A9cifiques%20du%20PLU2%20en%20vigueur.pdf",
+    "communes": [
+      { "nom": "Lille", "insee": "59350" }
+    ]
+  },
+  {
+    "ville": "Grenoble",
+    "territoire": "Commune de Grenoble (PLU communal, dans Grenoble-Alpes Métropole)",
+    "insee": "38185",
+    "type": "PLU",
+    "url_reglement_pdf": "https://data.geopf.fr/annexes/gpu/documents/DU_38515/edefcb7cc6ae6dd627a72505221f3083/38515_reglement_20260212.pdf",
+    "communes": [
+      { "nom": "Grenoble", "insee": "38185" }
+    ]
+  },
+  {
+    "ville": "Dijon",
+    "territoire": "Dijon Métropole (PLUi)",
+    "insee": "21231",
+    "type": "PLUi",
+    "url_reglement_pdf": "https://www.dijon-metropole.fr/wp-content/uploads/sites/10/2023/06/5_1_Reglement_litteral-1.pdf",
+    "communes": [
+      { "nom": "Dijon", "insee": "21231" }
+    ]
+  }
+]

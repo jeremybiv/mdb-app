@@ -4,19 +4,30 @@
   "installCommand": "npm install",
   "functions": {
     "api/index.mjs": {
-      "includeFiles": "backend/src/**"
+      "includeFiles": "backend/src/**,plu_data.json"
     },
     "api/sirene/search.mjs": {
       "includeFiles": "backend/src/services/kv.js,lib/**"
     },
     "api/sirene/rge.mjs": {
       "includeFiles": "lib/**"
+    },
+    "api/cron/refresh-plu.mjs": {
+      "includeFiles": "plu_data.json",
+      "maxDuration": 60
     }
   },
+  "crons": [
+    {
+      "path": "/api/cron/refresh-plu",
+      "schedule": "0 3 * * 0"
+    }
+  ],
   "rewrites": [
-    { "source": "/api/dvf",    "destination": "/api/dvf" },
-    { "source": "/api/:path*", "destination": "/api/index" },
-    { "source": "/health",     "destination": "/api/index" },
-    { "source": "/(.*)",       "destination": "/index.html" }
+    { "source": "/api/dvf",              "destination": "/api/dvf" },
+    { "source": "/api/cron/:path*",      "destination": "/api/cron/:path*" },
+    { "source": "/api/:path*",           "destination": "/api/index" },
+    { "source": "/health",               "destination": "/api/index" },
+    { "source": "/(.*)",                 "destination": "/index.html" }
   ]
 }
