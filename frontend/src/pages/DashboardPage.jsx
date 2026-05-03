@@ -3,11 +3,13 @@ import { AddressSearch } from '../components/AddressSearch.jsx';
 import { ApiSteps } from '../components/ApiSteps.jsx';
 import { ArtisansTable } from '../components/ArtisansTable.jsx';
 import { DebugPanel } from '../components/DebugPanel.jsx';
+import { MobileDashboard } from '../components/MobileDashboard.jsx';
 import { PrixMarche } from '../components/PrixMarche.jsx';
 import { RisquesMdb } from '../components/RisquesMdb.jsx';
 import { TradeSelector } from '../components/TradeSelector.jsx';
 import { ZoneCard } from '../components/ZoneCard.jsx';
 import { useArtisans } from '../hooks/useArtisans.js';
+import { useMobile } from '../hooks/useMobile.js';
 import { usePLU } from '../hooks/usePLU.js';
 import { computeStats, fetchTransactions } from '../lib/dvf.js';
 
@@ -170,6 +172,7 @@ function RisquesMiniCard({ onOpen }) {
 
 // ── DashboardPage ─────────────────────────────────────────
 export function DashboardPage() {
+  const isMobile = useMobile();
   const plu      = usePLU();
   const artisans = useArtisans();
   const [trades,          setTrades]         = useState([]);
@@ -225,6 +228,24 @@ export function DashboardPage() {
     });
     setActiveTab('artisans');
   };
+
+  if (isMobile) {
+    return (
+      <MobileDashboard
+        plu={plu} artisans={artisans}
+        trades={trades} setTrades={setTrades}
+        source={source} setSource={setSource}
+        propertyType={propertyType} setPropertyType={setPropertyType}
+        activeTab={activeTab} setActiveTab={setActiveTab}
+        darkMode={darkMode} toggleTheme={toggleTheme}
+        dvfSummary={dvfSummary} dvfLoading={dvfLoading}
+        communeNom={communeNom} citycode={citycode}
+        onAddressSearch={handleAddressSearch}
+        onArtisanSearch={handleArtisanSearch}
+        debugMode={debugMode} setDebugMode={setDebugMode}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-ink">
