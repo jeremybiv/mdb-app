@@ -1,5 +1,5 @@
 import { createRequire } from 'module';
-import { cacheGet, cacheSet } from '../lib/memcache.js';
+import { rcGet, rcSet } from '../lib/redisCache.js';
 
 const require = createRequire(import.meta.url);
 const pdfParse = require('pdf-parse');
@@ -422,8 +422,8 @@ export function extractRulesFromText(text) {
 
 export async function getPluZoneText(urlfic, zoneName) {
   // v5 : passe thématique (desserte, stationnement, etc.) + nouveaux patterns
-  const cacheKey = `plu_section_v5_${zoneName}_${Buffer.from(urlfic).toString('base64').slice(-24)}`;
-  const hit = cacheGet(cacheKey);
+  const cacheKey = `plu:section:v5:${zoneName}:${Buffer.from(urlfic).toString('base64').slice(-24)}`;
+  const hit = await rcGet(cacheKey);
   if (hit) {
     console.log(`[PLU-PDF] Cache hit section "${zoneName}" (${hit.section?.length ?? 0} chars, ${Object.values(hit.rules).filter(Boolean).length} règles)`);
     return hit;
@@ -441,8 +441,8 @@ export async function getPluZoneText(urlfic, zoneName) {
   const result = { section: section ?? null, rules };
 
   if (section) {
-    cacheSet(cacheKey, result, 72 * 3_600_000);
-    console.log(`[PLU-PDF] ✓ Section "${zoneName}" mise en cache`);
+    rcSet(cacheKey, result, 30 * 24 * 60 * 60);
+    console.log(`[PLU-PDF] ✓ Section "${zoneName}" mise en cache (Redis 30j)`);
   } else {
     console.warn(`[PLU-PDF] ✗ Section "${zoneName}" introuvable — Claude travaillera sans document`);
   }

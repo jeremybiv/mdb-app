@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { Router } from "express";
 import { cacheGet, cacheSet } from "../lib/memcache.js";
+import { rcGet, rcSet } from "../lib/redisCache.js";
 import { getKnownPdfUrl } from "../lib/pluData.js";
 import { NAF_BY_TRADE } from "../services/pappers.js";
 import { getPluZoneText } from "../services/pluPdf.js";
@@ -13,37 +14,45 @@ function parseJsonSafe(text) {
   try {
     return JSON.parse(text);
   } catch {
-    // Tente de fermer le JSON tronqué : supprime le dernier objet incomplet et ferme les tableaux/objets ouverts
-    let s = text;
-    // Retire le dernier objet partiel (commence par { sans } fermant)
-    const lastComma = s.lastIndexOf(",");
-    if (lastComma !== -1) s = s.slice(0, lastComma);
-    // Compte les accolades/crochets ouverts non fermés et ferme-les
-    let braces = 0,
-      brackets = 0,
-      inStr = false,
-      esc = false;
-    for (const ch of s) {
-      if (esc) {
-        esc = false;
-        continue;
-      }
-      if (ch === "\\") {
-        esc = true;
-        continue;
-      }
-      if (ch === '"') {
-        inStr = !inStr;
-        continue;
-      }
-      if (inStr) continue;
-      if (ch === "{") braces++;
-      if (ch === "}") braces--;
-      if (ch === "[") brackets++;
-      if (ch === "]") brackets--;
+    // Passe 1 : trouver le dernier "," structurel (hors string) pour couper l'entrée partielle
+    let braces = 0, brackets = 0, inStr = false, esc = false, lastSafeComma = -1;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (esc)              { esc = false; continue; }
+      if (ch === '\\' && inStr) { esc = true; continue; }
+      if (ch === '"')       { inStr = !inStr; continue; }
+      if (inStr)            continue;
+      if (ch === '{')  braces++;
+      if (ch === '}')  braces--;
+      if (ch === '[')  brackets++;
+      if (ch === ']')  brackets--;
+      if (ch === ',')  lastSafeComma = i;
     }
-    s += "]".repeat(Math.max(0, brackets)) + "}".repeat(Math.max(0, braces));
-    return JSON.parse(s);
+
+    let s = lastSafeComma !== -1 ? text.slice(0, lastSafeComma) : text;
+
+    // Passe 2 : recompter sur la chaîne coupée + fermer string/brackets/braces
+    braces = 0; brackets = 0; inStr = false; esc = false;
+    for (const ch of s) {
+      if (esc)              { esc = false; continue; }
+      if (ch === '\\' && inStr) { esc = true; continue; }
+      if (ch === '"')       { inStr = !inStr; continue; }
+      if (inStr)            continue;
+      if (ch === '{')  braces++;
+      if (ch === '}')  braces--;
+      if (ch === '[')  brackets++;
+      if (ch === ']')  brackets--;
+    }
+    if (inStr)     s += '"';
+    s += ']'.repeat(Math.max(0, brackets)) + '}'.repeat(Math.max(0, braces));
+
+    try {
+      return JSON.parse(s);
+    } catch {
+      // Dernier recours : extraire jusqu'au dernier objet complet
+      const lastBrace = text.lastIndexOf('}');
+      return JSON.parse(text.slice(0, lastBrace + 1) + ']'.repeat(Math.max(0, brackets)) + '}'.repeat(Math.max(0, braces - 1)));
+    }
   }
 }
 
@@ -159,9 +168,10 @@ router.post("/interpret-zone", async (req, res) => {
       }
     }
 
-    // Cache : clé différente selon présence du document et source (référentiel vs IGN)
-    const cacheKey = `claude_zone_v7_${zone}_${(commune || "").toLowerCase()}${zoneDocText ? `_doc_${pdfSource}` : ""}`;
-    const cached = cacheGet(cacheKey);
+    // Cache Redis 30j : clé stable par zone/commune et présence de document
+    const communeKey = (commune || '').toLowerCase().replace(/\s+/g, '-');
+    const cacheKey = `plu:analysis:v8:${zone}:${communeKey}:${zoneDocText ? 'doc' : 'nodoc'}`;
+    const cached = await rcGet(cacheKey);
     if (cached) return res.json({ ...cached, fromCache: true });
 
     // ── 2. Valeurs pré-extraites (déterministes) ─────────────
@@ -385,12 +395,13 @@ Extraire : SUP, Protections patrimoniales (ABF), Risques naturels (PPRI), OAP, E
       hasDocument:    !!zoneDocText,
       docTextLength:  zoneDocText?.length ?? 0,
       extractedRules: rulesForClient,
-      // Inclus en debug pour vérifier ce que Claude a réellement lu
       ...(process.env.NODE_ENV !== 'production' && zoneDocText
         ? { docTextPreview: zoneDocText.slice(0, 1000) }
         : {}),
     };
-    cacheSet(cacheKey, payload, 6 * 3_600_000);
+    // Mise en cache Redis 30j — docTextPreview exclu (debug only)
+    const { docTextPreview: _preview, ...payloadToCache } = payload;
+    rcSet(cacheKey, payloadToCache);
     res.json(payload);
   } catch (err) {
     res.status(502).json({ error: err.message });
@@ -483,7 +494,7 @@ scoreRisqueGlobal 0=très risqué → 100=très sécurisé. Max 6 risques, du pl
 
     const msg = await client.messages.create({
       model: MODEL_QUALITY,
-      max_tokens: 2048,
+      max_tokens: 4096,
       system: SYSTEM_EXPERT,
       messages: [{ role: "user", content: prompt }],
     });
