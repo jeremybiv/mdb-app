@@ -93,6 +93,20 @@ export async function rcDel(key) {
 }
 
 /**
+ * Liste les clés Redis correspondant à un pattern (ex: "usage:searches:*").
+ */
+export async function rcKeys(pattern) {
+  try {
+    const redis = getRedis();
+    if (!redis) return [];
+    return await redis.keys(pattern);
+  } catch (e) {
+    console.warn(`[rcache] KEYS "${pattern}": ${e.message}`);
+    return [];
+  }
+}
+
+/**
  * Stats du cache L1 (pour debug).
  */
 export function rcStats() {

@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Router } from "express";
 import { cacheGet, cacheSet } from "../lib/memcache.js";
 import { rcGet, rcSet } from "../lib/redisCache.js";
+import { getUserBudget, trackCost } from "../lib/costTracker.js";
 import { getKnownPdfUrl } from "../lib/pluData.js";
 import { NAF_BY_TRADE } from "../services/pappers.js";
 import { getPluZoneText } from "../services/pluPdf.js";
@@ -133,6 +134,10 @@ router.post("/interpret-zone", async (req, res) => {
   try {
     const { zone, typeZone, destDomi, libelong, urlfic, projetDescription, commune, citycode } = req.body;
     if (!zone) return res.status(400).json({ error: "zone required" });
+
+    // Vérification budget avant appel Claude
+    const budget = await getUserBudget(req.user.email);
+    if (budget.exceeded) return res.status(402).json({ error: `Budget dépassé (${budget.totalUsd.toFixed(3)}$ / ${budget.maxUsd}$)`, budgetExceeded: true });
 
     // ── 1. Résolution de l'URL PDF ─────────────────────────
     // Priorité : référentiel local plu_data.json (URL fiable, maintenu manuellement)
@@ -399,7 +404,8 @@ Extraire : SUP, Protections patrimoniales (ABF), Risques naturels (PPRI), OAP, E
         ? { docTextPreview: zoneDocText.slice(0, 1000) }
         : {}),
     };
-    // Mise en cache Redis 30j — docTextPreview exclu (debug only)
+    // Tracking coût + cache Redis 30j
+    trackCost(req.user.email, MODEL_QUALITY, msg.usage, 'interpret-zone');
     const { docTextPreview: _preview, ...payloadToCache } = payload;
     rcSet(cacheKey, payloadToCache);
     res.json(payload);
@@ -453,6 +459,10 @@ router.post("/risques-mdb", async (req, res) => {
     } = req.body;
     if (!zone) return res.status(400).json({ error: "zone required" });
 
+    // Vérification budget
+    const budget = await getUserBudget(req.user.email);
+    if (budget.exceeded) return res.status(402).json({ error: `Budget dépassé (${budget.totalUsd.toFixed(3)}$ / ${budget.maxUsd}$)`, budgetExceeded: true });
+
     // Cache : même zone + commune + type d'opération (TTL 6h)
     const cacheKey = `claude_risques_${zone}_${(commune || "").toLowerCase()}_${operationType}`;
     const cached = cacheGet(cacheKey);
@@ -501,6 +511,7 @@ scoreRisqueGlobal 0=très risqué → 100=très sécurisé. Max 6 risques, du pl
 
     const raw = msg.content[0].text.trim().replace(/```json|```/g, "");
     const parsed = parseJsonSafe(raw);
+    trackCost(req.user.email, MODEL_QUALITY, msg.usage, 'risques-mdb');
     cacheSet(cacheKey, parsed, 6 * 3_600_000);
     res.json(parsed);
   } catch (err) {

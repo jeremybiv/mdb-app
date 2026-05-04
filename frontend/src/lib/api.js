@@ -62,5 +62,6 @@ export const getSavedArtisans  = (params) => get('/api/cache/artisans', params);
 export const getRecentSearches = (params) => get('/api/cache/recherches', params);
 
 // ── Quota recherches ──────────────────────────────────────
-export const getSearchUsage = ()     => get('/api/search/usage');
-export const registerSearch = (body) => post('/api/search/register', body);
+export const getSearchUsage  = ()     => get('/api/search/usage');
+export const registerSearch  = (body) => post('/api/search/register', body);
+export const getAdminUsage   = ()     => get('/api/search/admin');

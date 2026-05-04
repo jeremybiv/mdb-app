@@ -13,6 +13,16 @@ import { useMobile } from '../hooks/useMobile.js';
 import { usePLU } from '../hooks/usePLU.js';
 import { computeStats, fetchTransactions } from '../lib/dvf.js';
 import { registerSearch, getSearchUsage } from '../lib/api.js';
+import { AdminPage } from '../components/AdminPage.jsx';
+
+// Décode l'email depuis le JWT stocké localement (sans vérification de signature)
+function getLocalEmail() {
+  try {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return null;
+    return JSON.parse(atob(token.split('.')[1])).email || null;
+  } catch { return null; }
+}
 
 const DEBUG_ENABLED = import.meta.env.VITE_DEBUG === 'true';
 const TABS = [
@@ -194,6 +204,8 @@ export function DashboardPage() {
   const [dvfSummary,      setDvfSummary]     = useState(null);
   const [dvfLoading,      setDvfLoading]     = useState(false);
   const [usage,           setUsage]          = useState(null); // { allowed, remaining, total, searches }
+  const [showAdmin,       setShowAdmin]      = useState(false);
+  const isAdmin = getLocalEmail() === (import.meta.env.VITE_ADMIN_EMAIL || 'admin@mdb.app');
 
   const citycode   = plu.geo?.citycode;
   const communeNom = plu.geo?.label?.split(',').pop()?.trim();
@@ -246,6 +258,8 @@ export function DashboardPage() {
     setActiveTab('artisans');
   };
 
+  if (showAdmin) return <AdminPage onBack={() => setShowAdmin(false)} />;
+
   if (isMobile) {
     return (
       <MobileDashboard
@@ -295,6 +309,15 @@ export function DashboardPage() {
               title="Recherches d'adresses restantes">
               {usage.remaining}/{usage.total} recherches
             </span>
+          )}
+          {isAdmin && (
+            <button onClick={() => setShowAdmin(true)} title="Administration"
+              className="p-1.5 rounded-md text-muted hover:text-dim hover:bg-border/40 transition-colors shrink-0 hidden sm:block">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+            </button>
           )}
           <span className="pill pill-green shrink-0 hidden sm:inline-flex">
             <span className="dot dot-g" />3 APIs actives

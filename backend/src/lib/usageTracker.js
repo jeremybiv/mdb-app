@@ -1,4 +1,4 @@
-import { rcGet, rcSet } from './redisCache.js';
+import { rcGet, rcSet, rcKeys } from './redisCache.js';
 
 const TTL_1Y = 365 * 24 * 60 * 60;
 
@@ -16,6 +16,19 @@ function userKey(email) {
 
 export async function getUserSearches(email) {
   return (await rcGet(userKey(email))) || [];
+}
+
+export async function getAllUserSearches() {
+  const max  = getMax();
+  const keys = await rcKeys('usage:searches:*');
+  const rows = await Promise.all(
+    keys.map(async key => {
+      const email   = key.replace('usage:searches:', '');
+      const searches = (await rcGet(key)) || [];
+      return { email, searches, remaining: Math.max(0, max - searches.length), total: max };
+    })
+  );
+  return rows.sort((a, b) => b.searches.length - a.searches.length);
 }
 
 /**
