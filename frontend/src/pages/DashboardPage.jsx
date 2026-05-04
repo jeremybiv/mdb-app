@@ -12,6 +12,7 @@ import { useArtisans } from '../hooks/useArtisans.js';
 import { useMobile } from '../hooks/useMobile.js';
 import { usePLU } from '../hooks/usePLU.js';
 import { computeStats, fetchTransactions } from '../lib/dvf.js';
+import { registerSearch, getSearchUsage } from '../lib/api.js';
 
 const DEBUG_ENABLED = import.meta.env.VITE_DEBUG === 'true';
 const TABS = [
@@ -192,9 +193,25 @@ export function DashboardPage() {
   const [propertyType,    setPropertyType]   = useState('maison');
   const [dvfSummary,      setDvfSummary]     = useState(null);
   const [dvfLoading,      setDvfLoading]     = useState(false);
+  const [usage,           setUsage]          = useState(null); // { allowed, remaining, total, searches }
 
   const citycode   = plu.geo?.citycode;
   const communeNom = plu.geo?.label?.split(',').pop()?.trim();
+
+  // Charge le quota initial au montage
+  useEffect(() => {
+    getSearchUsage().then(setUsage).catch(() => {});
+  }, []);
+
+  // Enregistre la recherche dès que l'adresse est résolue
+  useEffect(() => {
+    if (plu.status !== 'done' || !plu.geo?.label) return;
+    registerSearch({
+      adresse:  plu.geo.label,
+      citycode: plu.geo.citycode,
+      zone:     plu.zone?.libelle,
+    }).then(setUsage).catch(() => {});
+  }, [plu.status, plu.geo?.label]);
 
   // Auto-fetch DVF summary when address is resolved
   useEffect(() => {
@@ -273,6 +290,12 @@ export function DashboardPage() {
             </select>
             <AddressSearch onSearch={handleAddressSearch} loading={plu.status === 'loading'} />
           </div>
+          {usage && (
+            <span className={`pill shrink-0 hidden sm:inline-flex ${usage.remaining === 0 ? 'pill-red' : usage.remaining === 1 ? 'pill-amber' : 'pill-green'}`}
+              title="Recherches d'adresses restantes">
+              {usage.remaining}/{usage.total} recherches
+            </span>
+          )}
           <span className="pill pill-green shrink-0 hidden sm:inline-flex">
             <span className="dot dot-g" />3 APIs actives
           </span>
@@ -308,8 +331,25 @@ export function DashboardPage() {
           </div>
         )}
 
+        {/* Quota dépassé */}
+        {plu.status === 'done' && usage?.allowed === false && (
+          <div className="card border-red/20 text-center py-8 space-y-3">
+            <p className="text-2xl">🔒</p>
+            <p className="text-sm font-medium text-bright">Limite de recherches atteinte</p>
+            <p className="text-xs text-muted max-w-xs mx-auto">
+              Vous avez utilisé vos {usage.total} recherches d'adresses.
+              Contactez-nous pour étendre votre accès.
+            </p>
+            <div className="space-y-1 pt-2">
+              {usage.searches.map((s, i) => (
+                <p key={i} className="text-[11px] text-dim font-mono">{s.adresse}</p>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Content */}
-        {plu.status === 'done' && (
+        {plu.status === 'done' && usage?.allowed !== false && (
           <>
             {/* Geo context bar */}
             <div className="flex items-center gap-2 flex-wrap">

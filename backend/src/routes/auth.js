@@ -15,9 +15,9 @@ router.post('/login', (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password)
     return res.status(400).json({ error: 'email et password requis' });
-  const { email: E, password: P, secret: S } = cfg();
-  if (email.toLowerCase() !== E.toLowerCase() || password !== P)
-    return res.status(401).json({ error: 'Identifiants incorrects' });
+  const { password: P, secret: S } = cfg();
+  if (password !== P)
+    return res.status(401).json({ error: 'Mot de passe incorrect' });
 
   const token = jwt.sign({ email }, S, { expiresIn: '30d' });
   res.json({ token, email });
